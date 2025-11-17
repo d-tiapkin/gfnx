@@ -223,8 +223,8 @@ class FixedAutoregressiveSequenceEnvironment(SequenceEnvironment):
             return state.replace(is_pad=True)
 
         def get_next_state_not_terminal(state: EnvState, action: TAction) -> EnvState:
-            # action is a raveled multi-index of a pair (pos, char)
-            pos_to_update = time  # time is exactly the position to update
+            num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
+            pos_to_update = self.max_length - num_pad
             next_tokens = state.tokens.at[pos_to_update].set(action)
             is_done = jnp.all(next_tokens != self.pad_token)
             next_state = EnvState(
@@ -250,12 +250,14 @@ class FixedAutoregressiveSequenceEnvironment(SequenceEnvironment):
         """
         is_initial = state.is_initial
         time = state.time
+        num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
+        last_position = self.max_length - num_pad
 
         def get_prev_state_init_state(state: EnvState, backward_action: TAction) -> EnvState:
             return state.replace(is_pad=True)
 
         def get_prev_state_not_init_state(state: EnvState, backward_action: TAction) -> EnvState:
-            prev_tokens = state.tokens.at[state.time - 1].set(self.pad_token)
+            prev_tokens = state.tokens.at[last_position - 1].set(self.pad_token)
             is_initial = jnp.all(prev_tokens == self.pad_token)
             return state.replace(
                 tokens=prev_tokens,
@@ -295,7 +297,9 @@ class FixedAutoregressiveSequenceEnvironment(SequenceEnvironment):
         """Returns forward action given the complete characterization
         of the backward transition."""
         num_envs = state.time.shape[0]
-        return state.tokens[jnp.arange(num_envs), state.time - 1]
+        num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
+        last_position = self.max_length - num_pad
+        return state.tokens[jnp.arange(num_envs), last_position - 1]
 
     def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
         """Return mask of invalid actions"""
@@ -343,7 +347,9 @@ class FixedPrependAppendSequenceEnvironment(SequenceEnvironment):
                 return next_tokens.at[0].set(action)
 
             def get_next_tokens_append(state: EnvState, action: TAction) -> chex.Array:
-                return state.tokens.at[state.time].set(action - self.nchar)
+                num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
+                last_position = self.max_length - num_pad
+                return state.tokens.at[last_position].set(action - self.nchar)
 
             next_tokens = jax.lax.cond(
                 action < self.nchar,
@@ -384,12 +390,14 @@ class FixedPrependAppendSequenceEnvironment(SequenceEnvironment):
             return state.replace(is_pad=True)
 
         def get_prev_state_not_init_state(state: EnvState, backward_action: TAction) -> EnvState:
+            num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
+            last_position = self.max_length - num_pad
             def get_prev_tokens_prepend(state: EnvState) -> chex.Array:
                 prev_tokens = jax.lax.dynamic_update_slice(state.tokens, state.tokens[1:], (0,))
-                return prev_tokens.at[state.time - 1].set(self.pad_token)
+                return prev_tokens.at[last_position - 1].set(self.pad_token)
 
             def get_prev_tokens_append(state: EnvState) -> chex.Array:
-                return state.tokens.at[state.time - 1].set(self.pad_token)
+                return state.tokens.at[last_position - 1].set(self.pad_token)
 
             prev_tokens = jax.lax.cond(
                 backward_action == 0,
@@ -434,10 +442,12 @@ class FixedPrependAppendSequenceEnvironment(SequenceEnvironment):
     ) -> chex.Array:
         """Returns forward action given thebackward transition."""
         num_envs = state.time.shape[0]
+        num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
+        last_position = self.max_length - num_pad
         return jnp.where(
             backward_action == 0,
             state.tokens[:, 0],
-            self.nchar + state.tokens[jnp.arange(num_envs), state.time - 1],
+            self.nchar + state.tokens[jnp.arange(num_envs), last_position - 1],
         )
 
     def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
@@ -482,7 +492,9 @@ class AutoregressiveSequenceEnvironment(SequenceEnvironment):
             return state.replace(is_pad=True)
 
         def get_next_state_not_terminal(state: EnvState, action: TAction) -> EnvState:
-            pos_to_update = time  # time is exactly the position to update
+            #pos_to_update = time  # time is exactly the position to update
+            num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
+            pos_to_update = self.max_length - num_pad
             action_to_token = jnp.where(action != self.nchar, action, self.eos_token)
             next_tokens = state.tokens.at[pos_to_update].set(action_to_token)
             is_done = jnp.logical_or(
@@ -518,7 +530,9 @@ class AutoregressiveSequenceEnvironment(SequenceEnvironment):
             return state.replace(is_pad=True)
 
         def get_prev_state_not_init_state(state: EnvState, backward_action: TAction) -> EnvState:
-            prev_tokens = state.tokens.at[state.time - 1].set(self.pad_token)
+            num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
+            last_pos = self.max_length - num_pad
+            prev_tokens = state.tokens.at[last_pos - 1].set(self.pad_token)
             is_initial = jnp.all(prev_tokens == self.pad_token)
             return state.replace(
                 tokens=prev_tokens,
@@ -558,7 +572,10 @@ class AutoregressiveSequenceEnvironment(SequenceEnvironment):
         """Returns forward action given the complete characterization
         of the backward transition."""
         num_envs = state.time.shape[0]
-        return state.tokens[jnp.arange(num_envs), state.time - 1]
+        num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
+        last_pos = self.max_length - num_pad
+        actions = jnp.where(state.tokens != self.eos_token, state.tokens, self.nchar)
+        return jnp.where(last_pos != 0, actions[jnp.arange(num_envs), last_pos - 1], 0)
 
     def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
         """Return mask of invalid actions"""
@@ -694,11 +711,16 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
             invalid_mask_2d,
             (state.tokens.shape[0], self.max_length, self.nchar),
         )
-        return invalid_mask_2d.reshape(state.tokens.shape[0], -1)
+        invalid_mask_flat = invalid_mask_2d.reshape(state.tokens.shape[0], -1)
+        # If all positions are already filled (all True), return all zeros mask
+        all_filled = jnp.all(pos_mask, axis=-1, keepdims=True)
+        return jnp.where(all_filled, jnp.zeros_like(invalid_mask_flat), invalid_mask_flat)
 
     def get_invalid_backward_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
         """Returns mask of invalid backward actions."""
-        return state.tokens == self.pad_token
+        pos_mask = state.tokens == self.pad_token
+        all_filled = jnp.all(pos_mask, axis=-1, keepdims=True)
+        return jnp.where(all_filled, jnp.zeros_like(pos_mask), pos_mask)
 
     @property
     def action_space(self) -> spaces.Discrete:
@@ -784,6 +806,8 @@ class PrependAppendSequenceEnvironment(SequenceEnvironment):
         """
         is_initial = state.is_initial
         time = state.time
+        num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
+        last_update_pos = self.max_length - num_pad
 
         def get_prev_state_initial(state: EnvState, backward_action: TAction) -> EnvState:
             return state.replace(is_pad=True)
@@ -791,10 +815,10 @@ class PrependAppendSequenceEnvironment(SequenceEnvironment):
         def get_prev_state_non_initial(state: EnvState, backward_action: TAction) -> EnvState:
             def get_prev_tokens_prepend(state: EnvState) -> chex.Array:
                 prev_tokens = jax.lax.dynamic_update_slice(state.tokens, state.tokens[1:], (0,))
-                return prev_tokens.at[state.time - 1].set(self.pad_token)
+                return prev_tokens.at[last_update_pos - 1].set(self.pad_token)
 
             def get_prev_tokens_append(state: EnvState) -> chex.Array:
-                return state.tokens.at[state.time - 1].set(self.pad_token)
+                return state.tokens.at[last_update_pos - 1].set(self.pad_token)
 
             prev_tokens = jax.lax.cond(
                 backward_action == 0,
@@ -839,10 +863,12 @@ class PrependAppendSequenceEnvironment(SequenceEnvironment):
     ) -> chex.Array:
         """Returns forward action given thebackward transition."""
         num_envs = state.time.shape[0]
+        num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
+        last_update_pos = self.max_length - num_pad
         last_tokens_actions = jnp.where(
-            state.tokens[jnp.arange(num_envs), state.time - 1] == self.eos_token,
+            state.tokens[jnp.arange(num_envs), last_update_pos - 1] == self.eos_token,
             2 * self.nchar,
-            self.nchar + state.tokens[jnp.arange(num_envs), state.time - 1],
+            self.nchar + state.tokens[jnp.arange(num_envs), last_update_pos - 1],
         )
 
         return jnp.where(backward_action == 0, state.tokens[:, 0], last_tokens_actions)

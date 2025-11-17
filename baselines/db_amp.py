@@ -161,7 +161,10 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     # Step 2. Compute the loss
     def loss_fn(model: TransformerPolicy) -> chex.Array:
         # Call the network to get the logits
-        policy_outputs = jax.vmap(model, in_axes=(0,))(transitions.obs)
+        batch_size = transitions.obs.shape[0]
+        policy_outputs = jax.vmap(
+            lambda x, key: model(x, enable_dropout=True, key=key), in_axes=(0, 0)
+        )(transitions.obs, jax.random.split(rng_key, batch_size))
         # Compute the forward log-probs
         fwd_logits = policy_outputs["forward_logits"]
         invalid_mask = env.get_invalid_mask(transitions.state, env_params)
@@ -175,7 +178,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         log_flow = policy_outputs["log_flow"]
 
         # Compute the stats for the next state
-        next_policy_outputs = jax.vmap(model, in_axes=(0,))(transitions.next_obs)
+        next_policy_outputs = jax.vmap(
+            lambda x, key: model(x, enable_dropout=True, key=key), in_axes=(0, 0)
+        )(transitions.next_obs, jax.random.split(rng_key, batch_size))
         bwd_logits = next_policy_outputs["backward_logits"]
         next_bwd_invalid_mask = env.get_invalid_backward_mask(transitions.next_state, env_params)
         masked_bwd_logits = gfnx.utils.mask_logits(bwd_logits, next_bwd_invalid_mask)
@@ -192,12 +197,20 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         )
 
         # Compute the DB loss with masking
-        num_transition = jnp.logical_not(transitions.pad).sum()
+        transition = jnp.logical_not(transitions.pad)
+        done = transitions.done
+        not_done = jnp.logical_not(transitions.done)
+
         loss = optax.l2_loss(
             jnp.where(transitions.pad, 0.0, fwd_logprobs + log_flow),
             jnp.where(transitions.pad, 0.0, target),
-        ).sum()
-        return loss / num_transition
+        )
+
+        leaf_loss = (loss * done).sum() / (jnp.logical_and(transition, done)).sum()
+        flow_loss = ((loss * not_done).sum() / (jnp.logical_and(transition, not_done)).sum())
+
+        loss = leaf_loss * 25 + flow_loss
+        return loss 
 
     mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(train_state.model)
     # Step 3. Update the model with grads

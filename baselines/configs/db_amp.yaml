@@ -9,8 +9,8 @@ agent:
   learning_rate: 1e-3
   weight_decay: 1e-5
   train_backward: false
-  start_eps: 1e-3
-  end_eps: 1e-3
+  start_eps: 0.0
+  end_eps: 0.0
   exploration_steps: 1_000
 
 network:
