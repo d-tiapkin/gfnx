@@ -15,6 +15,7 @@ from gfnx.base import (
 )
 
 from .. import spaces
+from ..utils.dag import construct_all_dags, uint8bits_to_int32
 
 
 @chex.dataclass(frozen=True)
@@ -42,6 +43,26 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         super().__init__(reward_module)
         self.num_variables = num_variables
         self.stop_action = self.num_variables * self.num_variables
+
+        if self.is_enumerable:
+            # Construct all possible adjacency matrices. Shape: (num_graphs, N, N)
+            all_adjacencies = construct_all_dags(self.num_variables)
+            # Get the number of all possible DAGs
+            self.all_dags_num = all_adjacencies.shape[0]
+            # Reshape the adjacency matrices to a flat array
+            all_adjacencies_flat = all_adjacencies.reshape(-1, self.num_variables**2)
+            # Pack the bits of the adjacency matrices
+            all_adjacencies_flat_bits = jnp.packbits(all_adjacencies_flat, axis=1)
+            all_adjacencies_flat_bits = jax.vmap(uint8bits_to_int32)(all_adjacencies_flat_bits)
+            self.all_adjacencies_flat_bits = jnp.sort(all_adjacencies_flat_bits)
+
+            def _adj2id(adj: chex.Array) -> chex.Array:
+                adj_flat = adj.reshape(-1)
+                adj_bits = jnp.packbits(adj_flat)
+                adj_bits = uint8bits_to_int32(adj_bits)
+                return jnp.searchsorted(self.all_adjacencies_flat_bits, adj_bits)
+
+            self._adj2id = _adj2id
 
     def get_init_state(self, num_envs: int) -> EnvState:
         return EnvState(
@@ -138,14 +159,14 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         _, visited_final = jax.lax.while_loop(cond_fun, body_fun, (frontier_init, visited_init))
         return visited_final
 
-    def _single_compute_closure_t(self, adjacency_t: chex.Array) -> chex.Array:
+    def _single_compute_closure(self, adjacency: chex.Array) -> chex.Array:
         """
-        Given the adjacency matrix of G^T (shape (d, d)),
+        Given the adjacency matrix of G (shape (d, d)),
         compute its transitive closure via BFS-from-each-node.
-        closure_t[i, j] = True if i can reach j in the transpose graph (G^T).
+        closure[i, j] = True if i can reach j in the graph G.
         """
-        d = adjacency_t.shape[0]
-        closure = jax.vmap(lambda i: self._single_source_bfs(adjacency_t, i))(jnp.arange(d))
+        d = adjacency.shape[0]
+        closure = jax.vmap(lambda i: self._single_source_bfs(adjacency, i))(jnp.arange(d))
         # Force the diagonal True (i can reach i by convention)
         closure = jnp.logical_or(closure, jnp.eye(d, dtype=jnp.bool))
         return closure
@@ -180,8 +201,7 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         def get_state_inter() -> EnvState:
             source, target = jnp.divmod(backward_action, self.num_variables)
             adjacency_matrix = state.adjacency_matrix.at[source, target].set(False)
-            adjacency_t = adjacency_matrix.T
-            closure_T = self._single_compute_closure_t(adjacency_t)
+            closure_T = self._single_compute_closure(adjacency_matrix.T)
             return state.replace(
                 adjacency_matrix=adjacency_matrix,
                 closure_T=closure_T,
@@ -292,3 +312,76 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             "is_initial": spaces.Box(low=0, high=1, shape=(), dtype=jnp.bool),
             "is_pad": spaces.Box(low=0, high=1, shape=(), dtype=jnp.bool),
         })
+
+    @property
+    def is_enumerable(self) -> bool:
+        """Whether this environment supports enumerable operations."""
+        return self.num_variables < 6
+
+    def _get_states_rewards(self, env_params: EnvParams) -> chex.Array:
+        """
+        Returns the true distribution of rewards for all states in the DAG environment.
+        NOTE: The rewards are shifted since log rewards are ~-100.
+        """
+        all_adjacency_matrices = construct_all_dags(self.num_variables)
+        sort_idx = jax.vmap(self._adj2id)(all_adjacency_matrices)
+        all_adjacency_matrices = all_adjacency_matrices[sort_idx]
+        all_dags = jax.vmap(
+            lambda x: EnvState(
+                adjacency_matrix=x,
+                closure_T=self._single_compute_closure(x),
+                time=0,
+                is_terminal=True,
+                is_initial=False,
+                is_pad=False,
+            )
+        )(all_adjacency_matrices)
+        log_reward = self.reward_module.log_reward(all_dags, env_params)
+        log_reward = log_reward - jnp.median(log_reward)  # many outliers -> median
+        reward = jnp.exp(log_reward)
+        return reward
+
+    def get_true_distribution(self, env_params: EnvParams) -> chex.Array:
+        """
+        Returns the true distribution of rewards for all states in the DAG environment.
+        """
+        rewards = self._get_states_rewards(env_params)
+        return rewards / rewards.sum()
+
+    def get_empirical_distribution(self, states: EnvState, env_params: EnvParams) -> chex.Array:
+        """
+        Extracts the empirical distribution from the given states.
+        """
+        sample_idx = jax.vmap(self._adj2id)(states.adjacency_matrix)
+        valid_mask = states.is_terminal.astype(jnp.float32)
+        empirical_dist = jax.ops.segment_sum(
+            valid_mask, sample_idx, num_segments=self.all_dags_num
+        )
+        empirical_dist /= empirical_dist.sum()
+
+        return empirical_dist
+
+    @property
+    def is_mean_reward_tractable(self) -> bool:
+        """Whether this environment supports mean reward tractability."""
+        return self.num_variables < 6
+
+    def get_mean_reward(self, env_params: EnvParams) -> float:
+        """
+        Returns the mean reward for the DAG environment.
+        """
+        rewards = self._get_states_rewards(env_params)
+        return jnp.pow(rewards, 2).sum() / rewards.sum()
+
+    @property
+    def is_normalizing_constant_tractable(self) -> bool:
+        """Whether this environment supports tractable normalizing constant."""
+        return self.num_variables < 6
+
+    def get_normalizing_constant(self, env_params: EnvParams) -> float:
+        """
+        Returns the normalizing constant for the DAG environment.
+        The normalizing constant is computed as the sum of rewards.
+        """
+        rewards = self._get_states_rewards(env_params)
+        return rewards.sum()

@@ -1,7 +1,6 @@
-from . import bitseq
-from . import corr
+from . import bitseq, corr
 from .dag import load_dag_samples
-from .distances import kl_divergence, total_variation_distance
+from .distances import jensen_shannon_divergence, kl_divergence, total_variation_distance
 from .exploration import (
     ExplorationState,
     apply_epsilon_greedy,
@@ -9,6 +8,10 @@ from .exploration import (
     create_exploration_schedule,
 )
 from .masking import mask_logits
+from .molecules import (
+    QM9_SMALL_BLOCKS,
+    QM9_SMALL_FULL_ALPHABET,
+)
 from .phylogenetic_tree import get_phylo_initialization_args
 from .proteins import (
     AMINO_ACIDS,
@@ -16,10 +19,6 @@ from .proteins import (
     NUCLEOTIDES_FULL_ALPHABET,
     PROTEINS_FULL_ALPHABET,
     SPECIAL_TOKENS,
-)
-from .molecules import (
-    QM9_SMALL_BLOCKS,
-    QM9_SMALL_FULL_ALPHABET,
 )
 from .rollout import (
     TrajectoryData,
@@ -50,6 +49,7 @@ __all__ = [
     "forward_rollout",
     "forward_trajectory_log_ratio",
     "get_phylo_initialization_args",
+    "jensen_shannon_divergence",
     "kl_divergence",
     "load_dag_samples",
     "mask_logits",

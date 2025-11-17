@@ -35,6 +35,18 @@ def load_dag_samples(samples_path: Path) -> Dict[str, Any]:
     return {"samples": data, "num_variables": data.shape[1]}
 
 
+def uint8bits_to_int32(bits: chex.Array) -> chex.Array:
+    """
+    Convert an array of uint8 bits to an array of int32 bits.
+    NOTE: The max number of byte-chunks is 4,
+        e.g.: [255, 255, 255, 255] -> 4 bytes -> 32 bits
+    """
+    chex.assert_axis_dimension_lt(bits, 0, 5)  # 4 bytes is the maximum for int32
+    powers = jnp.arange(bits.shape[0] - 1, -1, -1)
+    return jnp.sum(bits * 256**powers)
+
+
+# TODO: (agarkovv) Make jit compatible
 def construct_all_dags(num_variables):
     """
     Return all possible adjacency matrices for DAGs with a given number of variables

@@ -24,11 +24,17 @@ import jraph
 import optax
 from jax_tqdm import loop_tqdm
 from omegaconf import OmegaConf
+from utils.checkpoint import save_checkpoint
+from utils.logger import Writer
 
 import gfnx
-
-from utils.logger import Writer
-from utils.checkpoint import save_checkpoint
+from gfnx.metrics.new import (
+    ApproxDistributionMetricsModule,
+    MultiMetricsModule,
+    MultiMetricsState,
+    TestCorrelationMetricsModule,
+)
+from gfnx.utils.dag import get_markov_blanket
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -289,8 +295,8 @@ class TrainState(NamedTuple):
     model: GNNPolicy
     optimizer: optax.GradientTransformation
     opt_state: optax.OptState
-    metrics_module: dict  # dict with metric modules
-    metrics: dict  # dict with metric states
+    metrics_module: MultiMetricsModule
+    metrics_state: MultiMetricsState
 
 
 @eqx.filter_jit
@@ -383,11 +389,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
                 sink_logprobs + bwd_logprobs + delta_score,
             ),
         ).mean()
-        return loss, log_info
+        return loss
 
-    (mean_loss, log_info), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(
-        train_state.model
-    )
+    mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(train_state.model)
     # Step 3. Update the model with grads
     updates, opt_state = train_state.optimizer.update(
         grads,
@@ -395,65 +399,96 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         eqx.filter(train_state.model, eqx.is_array),
     )
     model = eqx.apply_updates(train_state.model, updates)
-    # Peform all the requied logging
-    metric_state = {
-        key: module.update(train_state.metrics[key], log_info["final_env_state"], env_params)
-        for key, module in train_state.metrics_module.items()
-    }
 
-    # Compute the evaluation info if needed
-    def evaluation(args):
-        rng_key, metric_states, policy_params, env_params = args
-        corr_dict = train_state.metrics_module["corr"].compute(
-            rng_key, metric_states["corr"], policy_params, env_params
-        )
-        return {**corr_dict}
+    metrics_state = train_state.metrics_state
+    metrics_module = train_state.metrics_module
+
+    # Peform all the requied updates of metrics
+    metrics_state = metrics_module.update(
+        metrics_state=metrics_state,
+        rng_key=jax.random.key(0),  # not used, but required by the API
+        args=metrics_module.UpdateArgs(
+            metrics_args={
+                "distribution": ApproxDistributionMetricsModule.UpdateArgs(
+                    states=log_info["final_env_state"]
+                ),
+            }
+        ),
+    )
 
     rng_key, eval_rng_key = jax.random.split(rng_key)
-    eval_info = jax.lax.cond(
-        (idx % train_state.config.logging.track_each == 0)
-        | (idx + 1 == train_state.config.num_train_steps),
-        evaluation,
-        lambda _: {
-            "reward_corr": 0.0,
-            "edge_corr": 0.0,
-            "path_corr": 0.0,
-            "markov_blanket_corr": 0.0,
-            "jsd": 0.0,
+    # Perform evaluation computations if needed
+    is_eval_step = idx % train_state.config.logging.track_each == 0
+    is_eval_step = is_eval_step | (idx + 1 == train_state.config.num_train_steps)
+
+    metrics_state = jax.lax.cond(
+        is_eval_step,
+        lambda kwargs: metrics_module.process(**kwargs),
+        lambda kwargs: kwargs["metrics_state"],  # Do nothing if not eval step
+        {
+            "metrics_state": metrics_state,
+            "rng_key": eval_rng_key,
+            "args": metrics_module.ProcessArgs(
+                metrics_args={
+                    "distribution": ApproxDistributionMetricsModule.ProcessArgs(
+                        env_params=train_state.env_params,
+                    ),
+                    "reward_corr": TestCorrelationMetricsModule.ProcessArgs(
+                        policy_params=policy_params,
+                        env_params=train_state.env_params,
+                    ),
+                    "edge_corr": TestCorrelationMetricsModule.ProcessArgs(
+                        policy_params=policy_params,
+                        env_params=train_state.env_params,
+                    ),
+                    "path_corr": TestCorrelationMetricsModule.ProcessArgs(
+                        policy_params=policy_params,
+                        env_params=train_state.env_params,
+                    ),
+                    "markov_blanket_corr": TestCorrelationMetricsModule.ProcessArgs(
+                        policy_params=policy_params,
+                        env_params=train_state.env_params,
+                    ),
+                }
+            ),
         },
-        (eval_rng_key, metric_state, policy_params, env_params),
     )
 
     # Perform the logging via JAX debug callback
-    def logging_callback(idx: int, train_info: dict, eval_info: dict):
-        if (
-            idx % train_state.config.logging.track_each == 0
-            or idx + 1 == train_state.config.num_train_steps
-        ):
+    def logging_callback(idx: int, train_info: dict, metrics_state: MultiMetricsState, cfg):
+        train_info = {f"train/{key}": float(value) for key, value in train_info.items()}
+
+        if idx % cfg.logging.eval_each == 0 or idx + 1 == cfg.num_train_steps:
             log.info(f"Step {idx}")
-            log.info({key: float(value) for key, value in train_info.items()})
-            log.info({key: float(value) for key, value in eval_info.items()})
-            if train_state.config.logging.use_writer:
+            log.info(train_info)
+            eval_info = metrics_module.get(metrics_state)
+            eval_info = {f"eval/{key}": float(value) for key, value in eval_info.items()}
+            log.info(eval_info)
+            if cfg.logging.use_writer:
                 writer.log(eval_info, commit=False)
 
-        if train_state.config.logging.use_writer:
+        if cfg.logging.use_writer and idx % cfg.logging.track_each == 0:
             writer.log(train_info)
 
     jax.debug.callback(
         logging_callback,
         idx,
         {
-            "train/mean_loss": mean_loss,
-            "train/entropy": log_info["entropy"].mean(),
-            "train/grad_norm": optax.tree_utils.tree_l2_norm(grads),
+            "mean_loss": mean_loss,
+            "entropy": log_info["entropy"].mean(),
+            "grad_norm": optax.tree_utils.tree_l2_norm(grads),
+            "mean_reward": jnp.exp(log_info["log_gfn_reward"]).mean(),
+            "mean_log_reward": log_info["log_gfn_reward"].mean(),
+            "rl_reward": log_info["log_gfn_reward"].mean() + log_info["entropy"].mean(),
         },
-        {f"eval/{key}": value for key, value in eval_info.items()},
+        metrics_state,
+        train_state.config,
         ordered=True,
     )
 
     # Return the updated train state
     return train_state._replace(
-        rng_key=rng_key, model=model, opt_state=opt_state, metrics=metric_state
+        rng_key=rng_key, model=model, opt_state=opt_state, metrics_state=metrics_state
     )
 
 
@@ -533,19 +568,104 @@ def run_experiment(cfg: OmegaConf) -> None:
         policy_outputs = policy(env_obs)
         return policy_outputs["backward_logits"], policy_outputs
 
-    metrics_module = {
-        "corr": gfnx.metrics.DAGCorrelationMetric(
+    def edge_score_transform_fn(env_state: gfnx.DAGEnvState, log_score: chex.Array) -> chex.Array:
+        adjacency_matrix = env_state.adjacency_matrix
+        log_score = jnp.expand_dims(log_score, axis=(-1, -2))
+        edge_log_score = jax.nn.logsumexp(adjacency_matrix * log_score, axis=0).reshape(-1)
+        return edge_log_score
+
+    def path_score_transform_fn(env_state: gfnx.DAGEnvState, log_score: chex.Array) -> chex.Array:
+        closure = jnp.transpose(env_state.closure_T, (0, 2, 1))
+        score = jnp.expand_dims(log_score, axis=(-1, -2))
+        path_score = jax.nn.logsumexp(closure * score, axis=0).reshape(-1)
+        return path_score
+
+    def markov_blanket_transform_fn(
+        env_state: gfnx.DAGEnvState, log_score: chex.Array
+    ) -> chex.Array:
+        markov_blanket = jax.vmap(lambda x: get_markov_blanket(x), in_axes=0)(
+            env_state.adjacency_matrix
+        )  # (num_graphs, num_variables, num_variables)
+        log_score = jnp.expand_dims(log_score, axis=(-1, -2))
+        markov_blanket_score = jax.nn.logsumexp(markov_blanket * log_score, axis=0).reshape(-1)
+        return markov_blanket_score
+
+    metrics_module = MultiMetricsModule({
+        "distribution": ApproxDistributionMetricsModule(
+            metrics=["tv", "kl", "jsd"],
+            env=env,
+            buffer_size=cfg.logging.metric_buffer_size,
+        ),
+        "reward_corr": TestCorrelationMetricsModule(
             env=env,
             bwd_policy_fn=bwd_policy_fn,
             n_rounds=cfg.metrics.n_rounds,
             batch_size=cfg.metrics.batch_size,
         ),
-    }
-    # Fill the initial states of metrics
-    metrics_state = {}
-    for key, module in metrics_module.items():
-        eval_init_key, new_key = jax.random.split(eval_init_key)
-        metrics_state[key] = module.init(new_key, env_params)
+        "edge_corr": TestCorrelationMetricsModule(
+            env=env,
+            bwd_policy_fn=bwd_policy_fn,
+            n_rounds=cfg.metrics.n_rounds,
+            batch_size=cfg.metrics.batch_size,
+            transform_fn=edge_score_transform_fn,
+        ),
+        "path_corr": TestCorrelationMetricsModule(
+            env=env,
+            bwd_policy_fn=bwd_policy_fn,
+            n_rounds=cfg.metrics.n_rounds,
+            batch_size=cfg.metrics.batch_size,
+            transform_fn=path_score_transform_fn,
+        ),
+        "markov_blanket_corr": TestCorrelationMetricsModule(
+            env=env,
+            bwd_policy_fn=bwd_policy_fn,
+            n_rounds=cfg.metrics.n_rounds,
+            batch_size=cfg.metrics.batch_size,
+            transform_fn=markov_blanket_transform_fn,
+        ),
+    })
+
+    eval_init_key, correlation_init_key = jax.random.split(eval_init_key)
+
+    # Construct the test set
+    test_set_adjacency_matrix = gfnx.utils.dag.construct_all_dags(env_params.num_variables)
+    test_set_closure_T = jax.vmap(lambda x: env._single_compute_closure(x.T), in_axes=0)(
+        test_set_adjacency_matrix
+    )
+    num_graphs = test_set_adjacency_matrix.shape[0]
+    test_set_states = gfnx.DAGEnvState(
+        adjacency_matrix=test_set_adjacency_matrix,
+        closure_T=test_set_closure_T,
+        time=jnp.zeros(num_graphs, dtype=jnp.int32),  # dummy
+        is_terminal=jnp.ones(num_graphs, dtype=jnp.bool),
+        is_initial=jnp.zeros(num_graphs, dtype=jnp.bool),
+        is_pad=jnp.zeros(num_graphs, dtype=jnp.bool),
+    )
+
+    metrics_state = metrics_module.init(
+        eval_init_key,
+        metrics_module.InitArgs(
+            metrics_args={
+                "distribution": ApproxDistributionMetricsModule.InitArgs(env_params=env_params),
+                "reward_corr": TestCorrelationMetricsModule.InitArgs(
+                    env_params=env_params,
+                    test_set=test_set_states,
+                ),
+                "edge_corr": TestCorrelationMetricsModule.InitArgs(
+                    env_params=env_params,
+                    test_set=test_set_states,
+                ),
+                "path_corr": TestCorrelationMetricsModule.InitArgs(
+                    env_params=env_params,
+                    test_set=test_set_states,
+                ),
+                "markov_blanket_corr": TestCorrelationMetricsModule.InitArgs(
+                    env_params=env_params,
+                    test_set=test_set_states,
+                ),
+            }
+        ),
+    )
 
     train_state = TrainState(
         rng_key=rng_key,
@@ -557,7 +677,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         optimizer=optimizer,
         opt_state=opt_state,
         metrics_module=metrics_module,
-        metrics=metrics_state,
+        metrics_state=metrics_state,
     )
     # Split train state into parameters and static parts to make jit work.
     train_state_params, train_state_static = eqx.partition(train_state, eqx.is_array)
@@ -573,8 +693,12 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     if cfg.logging.use_writer:
         log.info("Initialize writer")
-        log_dir = cfg.logging.log_dir if cfg.logging.log_dir else os.path.join(
-            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
+        log_dir = (
+            cfg.logging.log_dir
+            if cfg.logging.log_dir
+            else os.path.join(
+                hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
+            )
         )
         writer.init(
             writer_type=cfg.writer.writer_type,
@@ -598,9 +722,13 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     # Save the final model
     train_state = eqx.combine(train_state_params, train_state_static)
-    dir = cfg.logging.checkpoint_dir if cfg.logging.checkpoint_dir else os.path.join(
-        hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
-        f"checkpoints_{os.getpid()}/",
+    dir = (
+        cfg.logging.checkpoint_dir
+        if cfg.logging.checkpoint_dir
+        else os.path.join(
+            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
+            f"checkpoints_{os.getpid()}/",
+        )
     )
     save_checkpoint(os.path.join(dir, "train_state"), train_state)
 

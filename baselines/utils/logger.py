@@ -204,7 +204,7 @@ class Writer:
         image.save(image_path)
 
         return image_path
-    
+
     def _save_json(self, name: str, data: dict):
         """Save dictionary as JSON file in log directory.
 

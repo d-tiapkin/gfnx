@@ -19,23 +19,25 @@ network:
 
 environment:
   # Data can be generated via utils.dag.generate_dataset
-  train_samples_path: "path/to/generated/data"
-  
+  train_samples_path: "path/to/train_data.csv"
+
   prior:
     type: uniform
-  
+
   likelihood:
-    type: linear_gaussian_score  # Or bge_score
+    type: linear_gaussian_score # Or bge_score
     prior_mean: 0.0
     prior_scale: 1.0
-    obs_scale: 0.316  # sqrt(0.1)
+    obs_scale: 0.316 # sqrt(0.1)
 
 metrics:
-  n_rounds : 10
-  batch_size : 1024
+  n_rounds: 10
+  batch_size: 29281
 
 logging:
-  track_each: 1000
+  track_each: 100 # in terms of total training steps, not divided by num_envs
+  eval_each: 500 # in terms of total training steps, not divited by num_envs
+  metric_buffer_size: 1_000_000
   tqdm_print_rate: 100
   use_writer: true
   log_dir: null # If null, dir will be automatically created
