@@ -1,0 +1,32 @@
+seed: 111
+env_init_seed: 1
+eval_init_seed: 2
+
+num_steps: 10000
+num_envs: 16
+
+agent:
+  learning_rate: 1e-3
+  eps_exploration: 0.00
+  train_backward: true
+
+network:
+  # Input size and output size are computed based on the environment
+  hidden_size: 256
+
+environment:
+  reward: "easy"
+  dim: 2
+  side: 20
+
+logging:
+  track_each: 500 # in terms of total training steps, not divited by num_envs
+  eval_max_sample_size: 200000
+  tqdm_print_rate: 1
+
+# Technical information for hydra
+hydra:
+  run:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}

@@ -12,7 +12,7 @@ from flax.training.train_state import TrainState
 import optax
 import orbax.checkpoint as ocp
 
-from datasets.base import RewardProxyDataset
+from gfnx.proxy.datasets.base import RewardProxyDataset
 from jax_tqdm import loop_tqdm
 from tqdm import tqdm
 

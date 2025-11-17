@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+sources = ["src"]
+
+
+[project]
+name = "gfnx"
+version = "0.0.1"
+dependencies = [
+  "jax>=0.4.27.0",
+  "jaxlib>=0.4.27.0",
+  "chex",
+  "levenshtein"
+]
+authors = [
+  { name="Daniil Tiapkin", email="daniil.tiapkin@polytechnique.edu" },
+]
+license = "MIT"
+description = "Environments for Generative Flow Networks in JAX"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+[project.optional-dependencies]
+algs = [
+  "optax",
+  "flax",
+  "distrax",
+  "flashbax"
+]
+
+[project.urls]
+Homepage = "https://github.com/d-tiapkin/gfnx"
+Issues = "https://github.com/d-tiapkin/gfnx/issues"
+
+
+
+[tool.ruff]
+preview = true
+exclude = [
+    ".git",
+    "build",
+    "__pycache__",
+]
+line-length = 79
+indent-width = 2
+target-version = "py310"
+
+
+[tool.ruff.lint]
+# Add the `line-too-long` rule to the enforced rule set. By default, Ruff omits rules that
+# overlap with the use of a formatter, like Black, but we can override this behavior by
+# explicitly adding the rule.
+extend-select = ["E501"]
+
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

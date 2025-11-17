@@ -12,7 +12,7 @@ import jax.numpy as jnp
 from clamp_common_eval.defaults import get_default_data_splits
 from sklearn.model_selection import GroupKFold
 
-from .base import RewardProxyDataset
+from gfnx.proxy.datasets.base import RewardProxyDataset
 
 # TODO: move it to a common place
 AMINO_ACIDS = [

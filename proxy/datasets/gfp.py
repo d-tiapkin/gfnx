@@ -11,7 +11,7 @@ import numpy as np
 import jax.numpy as jnp
 from sklearn.model_selection import train_test_split
 
-from .base import RewardProxyDataset
+from gfnx.proxy.datasets.base import RewardProxyDataset
 
 class GFPRewardProxyDataset(RewardProxyDataset):
     '''
