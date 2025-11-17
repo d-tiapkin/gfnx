@@ -128,14 +128,14 @@ class Writer:
         elif writer_type is None:
             self.backend = None
 
-        self.save_locally = save_locally
-        self.log_dir = log_dir
-        os.makedirs(self.log_dir, exist_ok=True)
-
         self._step = 0
         self._image_counter = 0
 
+        self.save_locally = save_locally
+        self.log_dir = log_dir
+
         if self.save_locally:
+            os.makedirs(self.log_dir, exist_ok=True)
             self._save_json("config.json", config)
 
     def log(self, data: dict, **kwargs):

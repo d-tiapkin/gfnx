@@ -13,9 +13,9 @@ from ..environment.hypergrid import HypergridEnvironment, EnvState, EnvParams
 
 class HypergridRenderer(BaseRenderer[EnvState]):
     POINTS_PER_INCH = 72
-    CELL_WIDTH = 32
-    BORDER_WIDTH = 1
-    TRAIL_WIDTH = 4
+    CELL_WIDTH = 32 / 100
+    BORDER_WIDTH = 1 / 100
+    TRAIL_WIDTH = 4 / 100
 
     TOKEN_PATTERNS = {
         "circle": np.array(
@@ -37,7 +37,7 @@ class HypergridRenderer(BaseRenderer[EnvState]):
         self,
         env: HypergridEnvironment,
         env_params: EnvParams,
-        dpp: float,
+        dpi: float,
         color_map: str = "tab20b",
     ):
         """Initialize the HypergridRenderer."""
@@ -45,7 +45,7 @@ class HypergridRenderer(BaseRenderer[EnvState]):
 
         self.env = env
         self.env_params = env_params
-        self.dpp = dpp
+        self.dpi = dpi
         self.agent_artists: List[matplotlib.artist.Artist] = []
         self.trajectory_artists: List[matplotlib.artist.Artist] = []
 
@@ -115,10 +115,10 @@ class HypergridRenderer(BaseRenderer[EnvState]):
         self, start_pos: Tuple[int, int], end_pos: Tuple[int, int], color: np.ndarray
     ) -> matplotlib.artist.Artist:
         """Render a trail between two positions using matplotlib lines."""
-        start_x = start_pos[0] * self.CELL_WIDTH + self.CELL_WIDTH // 2
-        start_y = start_pos[1] * self.CELL_WIDTH + self.CELL_WIDTH // 2
-        end_x = end_pos[0] * self.CELL_WIDTH + self.CELL_WIDTH // 2
-        end_y = end_pos[1] * self.CELL_WIDTH + self.CELL_WIDTH // 2
+        start_x = start_pos[0] * self.CELL_WIDTH + self.CELL_WIDTH / 2
+        start_y = start_pos[1] * self.CELL_WIDTH + self.CELL_WIDTH / 2
+        end_x = end_pos[0] * self.CELL_WIDTH + self.CELL_WIDTH / 2
+        end_y = end_pos[1] * self.CELL_WIDTH + self.CELL_WIDTH / 2
 
         line = matplotlib.lines.Line2D(
             [start_x, end_x],
@@ -162,7 +162,7 @@ class HypergridRenderer(BaseRenderer[EnvState]):
         height = self.env_params.side if self.env_params.dim == 2 else 1
         width = self.env_params.side
         fig, ax = plt.subplots(
-            1, 1, figsize=(width * self.CELL_WIDTH, height * self.CELL_WIDTH), dpi=self.dpp
+            1, 1, figsize=(width * self.CELL_WIDTH, height * self.CELL_WIDTH), dpi=self.dpi
         )
 
         ax.add_patch(

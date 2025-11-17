@@ -23,7 +23,7 @@ class Visualizer:
     Args:
         env: The vectorized environment to visualize
         env_params: Environment parameters
-        dpp: Dots per pixel - controls image resolution and quality. Higher values
+        dpi: Dots per pixel - controls image resolution and quality. Higher values
              produce sharper images but larger file sizes. Common values:
              - 1-2: Low resolution, fast rendering, small files
              - 3-4: Medium resolution, good balance
@@ -39,16 +39,16 @@ class Visualizer:
     """
 
     def __init__(
-        self, env: BaseVecEnvironment, env_params: BaseEnvParams, dpp: float = 2.0
+        self, env: BaseVecEnvironment, env_params: BaseEnvParams, dpi: float = 200.0
     ):
         """Initialize the Visualizer with the given environment and parameters.
 
         Args:
             env: The vectorized environment to visualize
             env_params: Environment parameters
-            dpp: Dots per pixel - image resolution multiplier. Controls the pixel
-                 density of rendered images. Higher DPP = more pixels = sharper
-                 images but slower rendering and larger files (default: 2.0)
+            dpi: Dots per inches - image resolution multiplier. Controls the pixel
+                 density of rendered images. Higher DPI = more pixels = sharper
+                 images but slower rendering and larger files (default: 200.0)
 
         Raises:
             NotImplementedError: If the environment type is not supported
@@ -56,9 +56,9 @@ class Visualizer:
         matplotlib.use("Agg")
 
         if issubclass(type(env), SequenceEnvironment):
-            self.backend = SequenceRenderer(env, env_params, dpp=dpp)
+            self.backend = SequenceRenderer(env, env_params, dpi=dpi)
         elif issubclass(type(env), HypergridEnvironment):
-            self.backend = HypergridRenderer(env, env_params, dpp=dpp)
+            self.backend = HypergridRenderer(env, env_params, dpi=dpi)
         else:
             raise NotImplementedError("Unsupported environment type")
 

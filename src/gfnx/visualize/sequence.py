@@ -11,8 +11,8 @@ from ..environment.sequence import SequenceEnvironment, EnvState, EnvParams
 
 class SequenceRenderer(BaseRenderer[EnvState]):
     PATTERN_SIZE = 8
-    CELL_WIDTH = 32
-    BORDER_WIDTH = 1
+    CELL_WIDTH = 32 / 100
+    BORDER_WIDTH = 1 / 100
 
     TOKEN_PATTERNS = {
         "char": np.array([
@@ -52,7 +52,7 @@ class SequenceRenderer(BaseRenderer[EnvState]):
         self,
         env: SequenceEnvironment,
         env_params: EnvParams,
-        dpp: float,
+        dpi: float,
         color_map: str = "tab20b",
     ):
         """Initialize the SequenceRenderer."""
@@ -60,7 +60,7 @@ class SequenceRenderer(BaseRenderer[EnvState]):
         self.env_params = env_params
         self.fig: matplotlib.figure.Figure | None = None
         self.ax: matplotlib.axes.Axes | None = None
-        self.dpp = dpp
+        self.dpi = dpi
         self.token_artists: List[matplotlib.artist.Artist] = []
 
         self.colors = matplotlib.colormaps[color_map](np.linspace(0, 1, env_params.ntoken))
@@ -172,7 +172,7 @@ class SequenceRenderer(BaseRenderer[EnvState]):
     def _create_background(self, height: int, width: int):
         """Create figure and background for visualization."""
         self.fig, self.ax = plt.subplots(
-            1, 1, figsize=(width * self.CELL_WIDTH, height * self.CELL_WIDTH), dpi=self.dpp
+            1, 1, figsize=(width * self.CELL_WIDTH, height * self.CELL_WIDTH), dpi=self.dpi
         )
         self.ax.set_xlim(0, width * self.CELL_WIDTH)
         self.ax.set_ylim(0, height * self.CELL_WIDTH)
