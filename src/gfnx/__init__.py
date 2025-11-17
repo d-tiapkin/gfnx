@@ -24,6 +24,9 @@ from .environment import (
     BitseqEnvironment,
     BitseqEnvParams,
     BitseqEnvState,
+    DAGEnvironment,
+    DAGEnvParams,
+    DAGEnvState,
     GFPEnvironment,
     GFPEnvParams,
     GFPEnvState,
@@ -39,6 +42,7 @@ from .environment import (
 )
 from .reward import (
     BitseqRewardModule,
+    DAGRewardModule,
     EasyHypergridRewardModule,
     EqxProxyAMPRewardModule,
     EqxProxyGFPRewardModule,
@@ -90,6 +94,10 @@ __all__ = [
     "TReward",
     "TRewardModule",
     "TRewardParams",
+    "DAGEnvironment",
+    "DAGEnvState",
+    "DAGEnvParams",
+    "DAGRewardModule",
 ]
 
 # Lazy import of networks since networks are based on Equinox

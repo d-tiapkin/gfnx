@@ -12,6 +12,7 @@ from .exploration import (
     apply_epsilon_greedy_vmap,
     create_exploration_schedule,
 )
+from .dag import load_dag_samples
 from .masking import mask_logits
 from .phylogenetic_tree import get_phylo_initialization_args
 from .proteins import (
@@ -44,6 +45,7 @@ __all__ = [
     "get_phylo_initialization_args",
     "detokenize",
     "forward_rollout",
+    "load_dag_samples",
     "mask_logits",
     "mode_set_distance",
     "spearmanr",

@@ -39,7 +39,8 @@ baselines = [
   "orbax-checkpoint",
   "hydra-core",
   "jax_tqdm",
-  "pillow"
+  "pillow",
+  "jraph"
 ]
 
 [project.urls]

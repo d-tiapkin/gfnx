@@ -4,6 +4,9 @@ from .amp import EnvState as AMPEnvState
 from .bitseq import BitseqEnvironment
 from .bitseq import EnvParams as BitseqEnvParams
 from .bitseq import EnvState as BitseqEnvState
+from .dag import DAGEnvironment
+from .dag import EnvParams as DAGEnvParams
+from .dag import EnvState as DAGEnvState
 from .gfp import EnvParams as GFPEnvParams
 from .gfp import EnvState as GFPEnvState
 from .gfp import GFPEnvironment
@@ -30,6 +33,9 @@ __all__ = [
     "HypergridEnvironment",
     "HypergridEnvState",
     "HypergridEnvParams",
+    "DAGEnvironment",
+    "DAGEnvState",
+    "DAGEnvParams",
     "PhyloTreeEnvironment",
     "PhyloTreeEnvState",
     "PhyloTreeEnvParams",
@@ -37,3 +43,4 @@ __all__ = [
     "TFBind8EnvState",
     "TFBind8EnvParams",
 ]
+

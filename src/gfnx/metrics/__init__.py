@@ -6,6 +6,7 @@ from .bitseq import (
     BitseqNumModesState,
 )
 from .small_bitseq import SmallBitseqMetricModule, SmallBitseqMetricState
+from .dag import DAGCorrelationMetric, DAGCorrelationState
 from .gfp import GFPMetricModule, GFPMetricState
 from .hypergrid import HypergridMetricModule, HypergridMetricState
 from .phylogenetic_tree import (
@@ -31,4 +32,6 @@ __all__ = [
     "SmallBitseqMetricModule",
     "TFBindMetricState",
     "TFBindMetricModule",
+    "DAGCorrelationMetric",
+    "DAGCorrelationState",
 ]
