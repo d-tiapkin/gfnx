@@ -1,0 +1,65 @@
+seed: 111
+env_init_seed: 1
+eval_init_seed: 2
+
+num_train_steps: 100_000
+num_envs: 32
+
+agent:
+  learning_rate:
+    peak_value: 3e-4
+    final_value: 1e-5
+    warmup_steps: 5_000
+  train_backward: False
+  exploration:
+    start_eps: 1.0
+    end_eps: 0.0
+    exploration_steps: 50_000
+    schedule_type: "linear"
+  target_update:
+    exponential_tau: 0.005
+
+network:
+  emb_params:
+    embedding_size: 128
+    embedding_width: 256
+    embedding_depth: 2
+
+  transformer_params:
+    hidden_size: 32
+    intermediate_size: 128
+    num_heads: 8
+    dropout_rate: 0.01
+    attention_dropout_rate: 0.01
+    num_layers: 6
+
+  mlp_params:
+    width_size: 256
+    depth: 3
+
+environment:
+  dataset: "DS1"  # One of DS1-DS8
+  data_folder: "src/gfnx/utils"  # Path to folder containing dataset JSON files
+
+metrics:
+  n_rounds: 32
+  n_terminal_states: 32
+  batch_size: 32
+
+logging:
+  track_each: 5000  # in terms of total training steps, not divided by num_envs
+  tqdm_print_rate: 500
+  use_wandb: True
+
+# Technical information for wandb
+wandb:
+  entity: null  # Will use the username of the user
+  project: gfnx
+  tags: ["fl-db", "phylogenetic trees", "huber_loss"]
+
+# Technical information for hydra
+hydra:
+  run:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}

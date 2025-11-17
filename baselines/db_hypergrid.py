@@ -218,7 +218,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         | (idx + 1 == train_state.config.num_train_steps),
         train_state.metrics_module.get,
         lambda x: {
-            "l1": -1.0,
+            "tv": -1.0,
             "kl": -1.0,
             "empirical_distribution": x.true_dist,
         },

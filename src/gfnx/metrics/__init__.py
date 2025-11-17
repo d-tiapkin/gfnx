@@ -5,9 +5,14 @@ from .bitseq import (
     BitseqNumModesMetric,
     BitseqNumModesState,
 )
-from .dag import DAGMetricsModule, DAGMetricsState
+from .small_bitseq import SmallBitseqMetricModule, SmallBitseqMetricState
 from .gfp import GFPMetricModule, GFPMetricState
 from .hypergrid import HypergridMetricModule, HypergridMetricState
+from .phylogenetic_tree import (
+    PhyloTreeCorrelationMetric,
+    PhyloTreeCorrelationState,
+)
+from .tfbind import TFBindMetricModule, TFBindMetricState
 
 __all__ = [
     "AMPMetricModule",
@@ -20,6 +25,10 @@ __all__ = [
     "GFPMetricState",
     "HypergridMetricState",
     "HypergridMetricModule",
-    "DAGMetricsModule",
-    "DAGMetricsState",
+    "PhyloTreeCorrelationMetric",
+    "PhyloTreeCorrelationState",
+    "SmallBitseqMetricState",
+    "SmallBitseqMetricModule",
+    "TFBindMetricState",
+    "TFBindMetricModule",
 ]

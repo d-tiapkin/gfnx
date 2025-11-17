@@ -16,3 +16,12 @@ def spearmanr(a: chex.Array, b: chex.Array):
         return jnp.float32(res.statistic)
 
     return jax.pure_callback(callback, jnp.float32(0), a, b)
+
+
+def pearsonr(a: chex.Array, b: chex.Array):
+    """Computation of Pearson correlation.
+
+    Assumes that at least two components for both a and b are different
+    """
+    chex.assert_equal_shape([a, b])
+    return jnp.corrcoef(a, b)[0, 1]

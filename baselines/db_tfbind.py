@@ -1,8 +1,8 @@
-"""Single-file implementation for Detailed Balance in bitseq environment.
+"""Single-file implementation for Detailed Balance in TFBind-8 environment.
 
 Run the script with the following command:
 ```bash
-python baselines/db_bitseq.py
+python baselines/db_tfbind.py
 ```
 
 Also see https://jax.readthedocs.io/en/latest/gpu_performance_tips.html for
@@ -63,7 +63,8 @@ class TransformerPolicy(eqx.Module):
             output_size += n_bwd_actions
 
         encoder_key, pooler_key = jax.random.split(key)
-        self.encoder = gfnx.networks.Encoder(key=encoder_key, **encoder_params)
+        #self.encoder = gfnx.networks.Encoder(key=encoder_key, **encoder_params)
+        self.encoder = eqx.nn.MLP(in_size=5 * 8, out_size=encoder_params["hidden_size"], width_size=256, depth=2, key=encoder_key)
         self.pooler = eqx.nn.Linear(
             in_features=encoder_params["hidden_size"],
             out_features=output_size,
@@ -77,11 +78,13 @@ class TransformerPolicy(eqx.Module):
         enable_dropout: bool = False,
         key: chex.PRNGKey | None = None,
     ) -> chex.Array:
-        pos_ids = jnp.arange(obs_ids.shape[0])
-        encoded_obs = self.encoder(
-            obs_ids, pos_ids, enable_dropout=enable_dropout, key=key
-        )["layers_out"][-1]  # [seq_len, hidden_size]
-        encoded_obs = encoded_obs.mean(axis=0)  # Average pooling
+        obs_ids = jax.nn.one_hot(obs_ids[1:], 5).reshape(-1)
+        encoded_obs = self.encoder(obs_ids)
+        # pos_ids = jnp.arange(obs_ids.shape[0])
+        # encoded_obs = self.encoder(
+        #     obs_ids, pos_ids, enable_dropout=enable_dropout, key=key
+        # )["layers_out"][-1]  # [seq_len, hidden_size]
+        #encoded_obs = encoded_obs.mean(axis=0)  # Average pooling
         output = self.pooler(encoded_obs)
         if self.train_backward_policy:
             forward_logits, flow, backward_logits = jnp.split(
@@ -105,13 +108,13 @@ class TransformerPolicy(eqx.Module):
 class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
     config: OmegaConf
-    env: gfnx.BitseqEnvironment
+    env: gfnx.TFBind8Environment
     env_params: chex.Array
     model: TransformerPolicy
     optimizer: optax.GradientTransformation
     opt_state: optax.OptState
-    metrics_module: dict  # dict with metric modules
-    metrics: dict  # dict with metric states
+    metrics_module: gfnx.metrics.TFBindMetricModule  # dict with metric modules
+    metrics: gfnx.metrics.TFBindMetricState  # dict with metric states
 
 
 @eqx.filter_jit
@@ -209,35 +212,17 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         eqx.filter(train_state.model, eqx.is_array),
     )
     model = eqx.apply_updates(train_state.model, updates)
-    # Peform all the requied updates of metrics
-    metric_state = {
-        key: module.update(
-            train_state.metrics[key], log_info["final_env_state"], env_params
-        )
-        for key, module in train_state.metrics_module.items()
-    }
-
+    # Peform all the requied logging
+    metric_state = train_state.metrics_module.update(
+        train_state.metrics, log_info["final_env_state"], env_params
+    )
     # Compute the evaluation info if needed
-    def evaluation(args):
-        rng_key, metric_states, policy_params, env_params = args
-        num_modes_dict = train_state.metrics_module["num_modes"].get(
-            metric_states["num_modes"]
-        )
-        corr_dict = train_state.metrics_module["corr"].compute(
-            rng_key, metric_states["corr"], policy_params, env_params
-        )
-        return {**num_modes_dict, **corr_dict}
-
-    rng_key, eval_rng_key = jax.random.split(rng_key)
     eval_info = jax.lax.cond(
         (idx % train_state.config.logging.track_each == 0)
         | (idx + 1 == train_state.config.num_train_steps),
-        evaluation,
-        lambda _: {
-            "num_modes": 0,
-            "spearman_corr": 0.0,
-        },
-        (eval_rng_key, metric_state, policy_params, env_params),
+        train_state.metrics_module.get,
+        lambda _: {"tv": -1.0, "kl": -1.0},
+        metric_state,
     )
 
     # Perform the logging via JAX debug callback
@@ -271,7 +256,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     )
 
 
-@hydra.main(config_path="configs/", config_name="db_bitseq", version_base=None)
+@hydra.main(config_path="configs/", config_name="db_tfbind", version_base=None)
 def run_experiment(cfg: OmegaConf) -> None:
     # Log the configuration
     log.info(OmegaConf.to_yaml(cfg))
@@ -284,16 +269,9 @@ def run_experiment(cfg: OmegaConf) -> None:
     eval_init_key = jax.random.PRNGKey(cfg.eval_init_seed)
 
     # Define the reward function for the environment
-    reward_module = gfnx.BitseqRewardModule(
-        sentence_len=cfg.environment.n,
-        k=cfg.environment.k,
-        mode_set_size=cfg.environment.num_modes,
-        reward_exponent=cfg.environment.reward_exponent,
-    )
+    reward_module = gfnx.TFBind8RewardModule()
     # Initialize the environment and its inner parameters
-    env = gfnx.BitseqEnvironment(
-        reward_module, n=cfg.environment.n, k=cfg.environment.k
-    )
+    env = gfnx.TFBind8Environment(reward_module)
     env_params = env.init(env_init_key)
 
     rng_key, net_init_key = jax.random.split(rng_key)
@@ -313,33 +291,12 @@ def run_experiment(cfg: OmegaConf) -> None:
     # Initialize the optimizer
     optimizer = optax.adam(learning_rate=cfg.agent.learning_rate)
     opt_state = optimizer.init(eqx.filter(model, eqx.is_array))
-    # Initialize the backward policy function for correlation computation
-    policy_static = eqx.filter(model, eqx.is_array, inverse=True)
 
-    def bwd_policy_fn(
-        rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
-    ) -> chex.Array:
-        del rng_key
-        policy = eqx.combine(policy_params, policy_static)
-        policy_outputs = jax.vmap(policy, in_axes=(0,))(env_obs)
-        return policy_outputs["backward_logits"], policy_outputs
-
-    metrics_module = {
-        "num_modes": gfnx.metrics.BitseqNumModesMetric(
-            cfg.environment.k, cfg.metrics.mode_threshold
-        ),
-        "corr": gfnx.metrics.BitseqCorrelationMetric(
-            env=env,
-            bwd_policy_fn=bwd_policy_fn,
-            n_rounds=cfg.metrics.n_rounds,
-            batch_size=cfg.metrics.batch_size,
-        ),
-    }
+    metrics_module = gfnx.metrics.TFBindMetricModule(
+        env, buffer_max_length=cfg.logging.metric_buffer_size
+    )
     # Fill the initial states of metrics
-    metrics = {}
-    for key, module in metrics_module.items():
-        eval_init_key, new_key = jax.random.split(eval_init_key)
-        metrics[key] = module.init(new_key, env_params)
+    metrics = metrics_module.init(eval_init_key, env_params)
 
     train_state = TrainState(
         rng_key=rng_key,

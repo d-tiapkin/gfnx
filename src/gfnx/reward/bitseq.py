@@ -60,9 +60,9 @@ class BitseqRewardModule(BaseRewardModule[BitseqEnvState, BitseqEnvParams]):
         def single_log_reward(tokens, reward_params):
             bitseq = detokenize(tokens, self.k)
             mode_dist = mode_set_distance(bitseq, reward_params["mode_set"])
-            return -self.reward_exponent * mode_dist.astype(jnp.float32)
+            return - self.reward_exponent * mode_dist.astype(jnp.float32)
 
-        return -jax.vmap(single_log_reward, in_axes=(0, None))(
+        return jax.vmap(single_log_reward, in_axes=(0, None))(
             state.tokens, env_params.reward_params
         )
 

@@ -24,24 +24,28 @@ from .environment import (
     BitseqEnvironment,
     BitseqEnvParams,
     BitseqEnvState,
-    DAGEnvironment,
-    DAGEnvParams,
-    DAGEnvState,
     GFPEnvironment,
     GFPEnvParams,
     GFPEnvState,
     HypergridEnvironment,
     HypergridEnvParams,
     HypergridEnvState,
+    PhyloTreeEnvironment,
+    PhyloTreeEnvParams,
+    PhyloTreeEnvState,
+    TFBind8Environment,
+    TFBind8EnvParams,
+    TFBind8EnvState
 )
 from .reward import (
     BitseqRewardModule,
-    DAGRewardModule,
     EasyHypergridRewardModule,
     EqxProxyAMPRewardModule,
     EqxProxyGFPRewardModule,
     GeneralHypergridRewardModule,
     HardHypergridRewardModule,
+    PhyloTreeRewardModule,
+    TFBind8RewardModule,
 )
 
 __all__ = [
@@ -67,7 +71,15 @@ __all__ = [
     "HypergridEnvironment",
     "HypergridEnvParams",
     "HypergridEnvState",
+    "PhyloTreeEnvironment",
+    "PhyloTreeEnvParams",
+    "PhyloTreeEnvState",
+    "PhyloTreeRewardModule",
     "TAction",
+    "TFBind8Environment",
+    "TFBind8EnvParams",
+    "TFBind8EnvState",
+    "TFBind8RewardModule",
     "TBackwardAction",
     "TDone",
     "TEnvParams",
@@ -78,10 +90,6 @@ __all__ = [
     "TReward",
     "TRewardModule",
     "TRewardParams",
-    "DAGEnvironment",
-    "DAGEnvState",
-    "DAGEnvParams",
-    "DAGRewardModule",
 ]
 
 # Lazy import of networks since networks are based on Equinox
