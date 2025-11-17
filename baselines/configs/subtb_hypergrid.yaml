@@ -1,0 +1,40 @@
+seed: 111
+env_init_seed: 1
+eval_init_seed: 2
+
+num_train_steps: 62500
+num_envs: 16
+
+agent:
+  learning_rate: 1e-3
+  eps_exploration: 0.00
+  train_backward: true
+  lmbd: 1.0
+
+network:
+  # Input size and output size are computed based on the environment
+  hidden_size: 128
+  depth: 2
+
+environment:
+  reward: "easy"
+  dim: 2
+  side: 5
+
+logging:
+  track_each: 100 # in terms of total training steps, not divided by num_envs
+  metric_buffer_size: 200000
+  tqdm_print_rate: 20
+  use_wandb: True
+
+# Technical information for wandb
+wandb:
+  entity: NULL
+  project: sacling_laws
+
+# Technical information for hydra
+hydra:
+  run:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}
