@@ -24,6 +24,7 @@ import numpy as np
 import optax
 import orbax.checkpoint as ocp
 from jax_tqdm import loop_tqdm
+from jaxtyping import Array, Int
 from omegaconf import OmegaConf
 
 import gfnx
@@ -33,71 +34,72 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 
-class MLPPolicy(eqx.Module):
+class TransformerPolicy(eqx.Module):
     """
-    A policy module that uses a Multi-Layer Perceptron (MLP) to generate
-    forward and backward action logits.
-
-    Args:
-        input_size (int): The size of the input features.
-        n_fwd_actions (int): Number of forward actions.
-        n_bwd_actions (int): Number of backward actions.
-        hidden_size (int): The size of the hidden layers in the MLP.
-        train_backward_policy (bool): Flag indicating whether to train
-            the backward policy.
-        depth (int): The number of layers in the MLP.
-        rng_key (chex.PRNGKey): Random key for initializing the MLP.
-
-    Methods:
-        __call__(x: chex.Array) -> chex.Array:
-            Forward pass through the MLP network. Returns a dictionary
-            containing forward logits and backward logits.
+    A policy module that uses a simple transformer model to generate
+    forward and backward action logits as well as a flow.
     """
 
-    network: eqx.nn.MLP
+    encoder: gfnx.networks.Encoder
+    pooler: eqx.nn.Linear
     train_backward_policy: bool
     n_fwd_actions: int
     n_bwd_actions: int
 
     def __init__(
         self,
-        input_size: int,
         n_fwd_actions: int,
         n_bwd_actions: int,
-        hidden_size: int,
         train_backward_policy: bool,
-        depth: int,
-        rng_key: chex.PRNGKey,
+        encoder_params: dict,
+        *,
+        key: chex.PRNGKey,
     ):
         self.train_backward_policy = train_backward_policy
         self.n_fwd_actions = n_fwd_actions
         self.n_bwd_actions = n_bwd_actions
 
-        output_size = self.n_fwd_actions
+        output_size = self.n_fwd_actions + 1  # +1 for flow
         if train_backward_policy:
             output_size += n_bwd_actions
-        self.network = eqx.nn.MLP(
-            in_size=input_size,
-            out_size=output_size,
-            width_size=hidden_size,
-            depth=depth,
-            key=rng_key,
+
+        encoder_key, pooler_key = jax.random.split(key)
+        self.encoder = gfnx.networks.Encoder(key=encoder_key, **encoder_params)
+        self.pooler = eqx.nn.Linear(
+            in_features=encoder_params["hidden_size"],
+            out_features=output_size,
+            key=pooler_key,
         )
 
-    def __call__(self, x: chex.Array) -> chex.Array:
-        x = self.network(x)
+    def __call__(
+        self,
+        obs_ids: Int[Array, " seq_len"],
+        *,
+        enable_dropout: bool = False,
+        key: chex.PRNGKey | None = None,
+    ) -> chex.Array:
+        pos_ids = jnp.arange(obs_ids.shape[0])
+        encoded_obs = self.encoder(
+            obs_ids, pos_ids, enable_dropout=enable_dropout, key=key
+        )["layers_out"][-1]  # [seq_len, hidden_size]
+        encoded_obs = encoded_obs.mean(axis=0)  # Average pooling
+        output = self.pooler(encoded_obs)
         if self.train_backward_policy:
-            forward_logits, backward_logits = jnp.split(
-                x, [self.n_fwd_actions], axis=-1
+            # The TB loss does not use the flow term from the policy.
+            # We expect fwd_logits and bwd_logits only.
+            # So, we will ignore the flow term here.
+            fwd_logits, _, bwd_logits = jnp.split(
+                output, [self.n_fwd_actions, self.n_fwd_actions + 1], axis=-1
             )
         else:
-            forward_logits = x
-            backward_logits = jnp.zeros(
+            # Similarly, ignore flow if not training backward policy.
+            fwd_logits, _ = jnp.split(output, [self.n_fwd_actions], axis=-1)
+            bwd_logits = jnp.zeros(
                 shape=(self.n_bwd_actions,), dtype=jnp.float32
             )
         return {
-            "forward_logits": forward_logits,
-            "backward_logits": backward_logits,
+            "forward_logits": fwd_logits,
+            "backward_logits": bwd_logits,
         }
 
 
@@ -105,14 +107,14 @@ class MLPPolicy(eqx.Module):
 class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
     config: OmegaConf
-    env: gfnx.HypergridEnvironment
+    env: gfnx.AMPEnvironment
     env_params: chex.Array
-    model: MLPPolicy
+    model: TransformerPolicy
     logZ: chex.Array  # Added logZ here
     optimizer: optax.GradientTransformation
     opt_state: optax.OptState
-    metrics_module: gfnx.metrics.HypergridMetricModule
-    metrics: gfnx.metrics.HypergridMetricState
+    metrics_module: gfnx.metrics.AMPMetricModule
+    metrics: gfnx.metrics.AMPMetricState
 
 
 @eqx.filter_jit
@@ -130,38 +132,60 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     # Step 1. Generate a batch of trajectories
     rng_key, sample_traj_key = jax.random.split(rng_key)
 
-    # Define the policy function suitable for gfnx.utils.forward_rollout
-    # Note: policy_params for this function are only the MLPPolicy's network
-    # parameters
+    # Define the policy function suitable for gfnx.utils.forward_rollout.
+    # This function is called per-environment step to get action logits.
+    # - fwd_rng_key: PRNGKey for potential stochasticity in the policy 
+    #   (e.g., dropout).
+    # - env_obs: Current environment observation 
+    #   (for TransformerPolicy, these are obs_ids).
+    # - current_policy_params: Learnable parameters of the policy network.
     def fwd_policy_fn(
         fwd_rng_key: chex.PRNGKey,
         env_obs: gfnx.TObs,
-        current_policy_params,  # current_policy_params are network params
+        current_policy_params,
     ) -> chex.Array:
-        del fwd_rng_key
-        # Recombine the network parameters with the static parts of the model
+        # Recombine the learnable parameters with the static parts
+        # of the policy model.
         current_model = eqx.combine(current_policy_params, policy_static)
-        policy_outputs = jax.vmap(current_model, in_axes=(0,))(env_obs)
+
+        # env_obs is expected to be batched (num_envs, seq_len).
+        # Create per-sample dropout keys for the batch.
+        num_samples = env_obs.shape[0]
+        dropout_keys = jax.random.split(fwd_rng_key, num_samples)
+
+        # Apply the policy model to each observation in the batch using vmap.
+        # Dropout is enabled by enable_dropout=True and a unique key per sample
+        policy_outputs = jax.vmap(
+            lambda model, obs, dkey: model(obs, enable_dropout=True, key=dkey),
+            in_axes=(
+                None,
+                0,
+                0,
+            ),  # Model is fixed; map over obs and dropout_keys.
+        )(current_model, env_obs, dropout_keys)
+
         return policy_outputs["forward_logits"], policy_outputs
 
+    # Generate a batch of trajectories using the defined forward policy.
+    # policy_params here are the learnable parameters of train_state.model.
     traj_data, aux_info = gfnx.utils.forward_rollout(
         rng_key=sample_traj_key,
         num_envs=num_envs,
         policy_fn=fwd_policy_fn,
-        policy_params=policy_params,  # Pass only network parameters
+        policy_params=policy_params,
         env=env,
         env_params=env_params,
     )
 
-    # Step 2. Compute the loss
-    # loss_fn now takes combined parameters (model_params and logZ)
-    # It also needs static parts of the model to reconstruct it.
+    # Step 2. Compute the loss.
+    # The loss_fn takes all learnable parameters (model and logZ) 
+    # and static model parts.
     def loss_fn(
         current_all_params: dict,
-        static_model_parts: MLPPolicy,
+        static_model_parts: TransformerPolicy,
         current_traj_data: gfnx.utils.TrajectoryData,
-        current_env: gfnx.HypergridEnvironment,
-        current_env_params: gfnx.HypergridEnvParams,
+        current_env: gfnx.AMPEnvironment,
+        current_env_params: gfnx.AMPEnvParams,
     ):
         # Extract model's learnable parameters and logZ from the input
         model_learnable_params = current_all_params["model_params"]
@@ -170,21 +194,32 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         # Reconstruct the callable model using its learnable parameters
         model_to_call = eqx.combine(model_learnable_params, static_model_parts)
 
+        # For TransformerPolicy, obs is obs_ids.
+        # Dropout key can be omitted or a dummy one provided if not training.
+        # Assuming no dropout needed for loss computation based 
+        # on existing structure.
         policy_outputs_traj = jax.vmap(jax.vmap(model_to_call))(
-            current_traj_data.obs
+            current_traj_data.obs  # obs is obs_ids
         )
 
-        # Step 2.1 Compute forward actions and log probabilities
         fwd_logits_traj = policy_outputs_traj["forward_logits"]
 
-        # Vmap get_fwd_masks_per_step over the time dimension. For each time
-        # step t, it processes the batch of states state[:, t, ...].
-        invalid_fwd_mask = jax.vmap(
-            current_env.get_invalid_mask, in_axes=(1, None), out_axes=1
+        # Calculate forward masks.
+        # jax.vmap is used to apply get_invalid_mask over the time dimension 1
+        # of current_traj_data.state. Leaves in current_traj_data.state 
+        # are expected to have shape (batch_size, time, ...).
+        invalid_fwd_mask_batch_time_actions = jax.vmap(
+            current_env.get_invalid_mask,
+            in_axes=(
+                1,
+                None,
+            ),  # Map over axis 1 of states, env_params is fixed.
+            out_axes=1,  # Output mask also has time as axis 1.
         )(current_traj_data.state, current_env_params)
+        # Resulting shape: (batch_size, time, num_fwd_actions)
 
         masked_fwd_logits_traj = gfnx.utils.mask_logits(
-            fwd_logits_traj, invalid_fwd_mask
+            fwd_logits_traj, invalid_fwd_mask_batch_time_actions
         )
         fwd_all_log_probs_traj = jax.nn.log_softmax(
             masked_fwd_logits_traj, axis=-1
@@ -200,33 +235,66 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             current_traj_data.pad, 0.0, fwd_logprobs_traj
         )
         sum_log_pf_along_traj = fwd_logprobs_traj.sum(axis=1)
-        # Use extracted logZ_val
-        log_pf_traj = logZ_val + sum_log_pf_along_traj
+        log_pf_traj = (
+            logZ_val + sum_log_pf_along_traj
+        )  # Use extracted logZ_val
 
-        # Step 2.2 Compute backward actions and log probabilities
-        prev_states = jax.tree.map(
+        # Calculate backward actions.
+        # Slicing trajectory data to get seq. of (state, action, next_state).
+        # prev_states_for_bwd: states from t=0 to T-1.
+        # Shape: (batch, max_len, ...)
+        prev_states_for_bwd = jax.tree.map(
             lambda x: x[:, :-1], current_traj_data.state
         )
-        fwd_actions = current_traj_data.action[:, :-1]
-        curr_states = jax.tree.map(lambda x: x[:, 1:], current_traj_data.state)
+        # fwd_actions_for_bwd: actions from t=0 to T-1.
+        # Shape: (batch, max_len)
+        fwd_actions_for_bwd = current_traj_data.action[:, :-1]
+        # curr_states_for_bwd: states from t=1 to T.
+        # Shape: (batch, max_len, ...)
+        curr_states_for_bwd = jax.tree.map(
+            lambda x: x[:, 1:], current_traj_data.state
+        )
 
+        # jax.vmap is used to apply get_backward_action 
+        # over the time dimension (axis 1).
         bwd_actions_traj = jax.vmap(
             current_env.get_backward_action,
-            in_axes=(1, 1, 1, None),
-            out_axes=1,
-        )(prev_states, fwd_actions, curr_states, current_env_params)
+            in_axes=(
+                1,
+                1,
+                1,
+                None,
+            ),  # Map over time axis of states and actions.
+            out_axes=1,  # Output also has time as axis 1.
+        )(
+            prev_states_for_bwd,
+            fwd_actions_for_bwd,
+            curr_states_for_bwd,
+            current_env_params,
+        )
+        # Resulting bwd_actions_traj shape: (batch_size, max_len)
+        chex.assert_rank(bwd_actions_traj, 2)
 
         bwd_logits_traj = policy_outputs_traj["backward_logits"]
-        bwd_logits_for_pb = bwd_logits_traj[:, 1:]
-        # Vmap get_bwd_masks_per_step over the time dimension.
-        invalid_bwd_mask = jax.vmap(
+        bwd_logits_for_pb = bwd_logits_traj[
+            :, 1:
+        ]  # Logits for P_B(s_t+1 | s_t)
+
+        # Calculate backward masks using curr_states_for_bwd 
+        # (states from t=1 to T).
+        # These are the states *from which* backward actions are taken.
+        # jax.vmap maps get_invalid_backward_mask over the time dimension (1).
+        invalid_bwd_mask_batch_time_actions = jax.vmap(
             current_env.get_invalid_backward_mask,
-            in_axes=(1, None),
-            out_axes=1,
-        )(curr_states, current_env_params)
+            in_axes=(1, None),  # Map over time axis of states.
+            out_axes=1,  # Output also has time as axis 1.
+        )(curr_states_for_bwd, current_env_params)
+        # Resulting shape: (batch_size, max_len, num_bwd_actions)
+        # Note: max_len here refers to the length of curr_states_for_bwd (T).
+        # This matches the length of bwd_logits_for_pb (logits from t=1 to T).
 
         masked_bwd_logits_traj = gfnx.utils.mask_logits(
-            bwd_logits_for_pb, invalid_bwd_mask
+            bwd_logits_for_pb, invalid_bwd_mask_batch_time_actions
         )
         bwd_all_log_probs_traj = jax.nn.log_softmax(
             masked_bwd_logits_traj, axis=-1
@@ -234,7 +302,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
 
         log_pb_selected = jnp.take_along_axis(
             bwd_all_log_probs_traj,
-            jnp.expand_dims(bwd_actions_traj, axis=-1),
+            jnp.expand_dims(
+                bwd_actions_traj, axis=-1
+            ),  # Unconditionally expand
             axis=-1,
         ).squeeze(-1)
 
@@ -280,56 +350,59 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     new_model = eqx.apply_updates(train_state.model, updates["model_params"])
     new_logZ = eqx.apply_updates(train_state.logZ, updates["logZ"])
 
-    # Perform all the required logging
+    # Perform metrics updates using the AMPMetricModule.
+    # aux_info["final_env_state"] contains the final states of trajectories.
     metric_state = train_state.metrics_module.update(
         train_state.metrics, aux_info["final_env_state"], env_params
     )
-    # Compute the evaluation info if needed
+
+    # Conditionally compute and log detailed evaluation metrics.
+    # This happens at specified intervals or at the last training step.
+    # current_policy_params are the learnable parameters of the current model.
+    current_policy_params = eqx.filter(train_state.model, eqx.is_array)
+
+    rng_key, eval_rng_key_for_cond = jax.random.split(rng_key)
+    # jax.lax.cond to either compute metrics or return placeholders.
     eval_info = jax.lax.cond(
-        (idx % train_state.config.logging.track_each == 0)
-        | (idx + 1 == train_state.config.num_train_steps),
-        train_state.metrics_module.get,
-        lambda x: {
-            "tv": -1.0,
-            "kl": -1.0,
-            "empirical_distribution": x.true_dist,
+        (idx % train_state.config.logging.track_each == 0)  # Log every N steps
+        | (idx + 1 == train_state.config.num_train_steps),  # Or if last step
+        train_state.metrics_module.compute,  # Function to call if true
+        lambda x,y,z,w : {
+            "top10_rew": -1.0,
+            "top50_rew": -1.0,
+            "top100_rew": -1.0,
+            "top10_div": -1.0,
+            "top50_div": -1.0,
+            "top100_div": -1.0,
+            "mean_len": -1.0,
         },
+        eval_rng_key_for_cond,
         metric_state,
+        current_policy_params,
+        env_params,
     )
 
-    # Perform the logging via JAX debug callback
+    # Logging via JAX debug callback for train and evaluation info.
     def logging_callback(
         idx: int,
         train_info: dict,
         eval_info: dict,
         cfg_from_train_state: OmegaConf,
     ):
+        # Log to console if it's a tracking step or the last step.
         if (
             idx % cfg_from_train_state.logging.track_each == 0
             or idx + 1 == cfg_from_train_state.num_train_steps
         ):
             log.info(f"Step {idx}")
             log.info({key: float(value) for key, value in train_info.items()})
-            log.info({
-                key: float(value)
-                for key, value in eval_info.items()
-                if key != "eval/empirical_distribution"
-            })
+            log.info({key: float(value) for key, value in eval_info.items()})
+            # Log to Weights & Biases if enabled.
             if cfg_from_train_state.logging.use_wandb:
-                empirical_dist = eval_info["eval/empirical_distribution"]
-                ndim = len(empirical_dist.shape)
-                index_tuple = (slice(None), slice(None), *([0] * (ndim - 2)))
-                # Take a slice of the empirical distribution to visualize it
-                empirical_dist = empirical_dist[index_tuple]
-                empirical_dist = (empirical_dist - empirical_dist.min()) / (
-                    empirical_dist.max() - empirical_dist.min()
-                )
-                eval_info["eval/empirical_distribution"] = wandb.Image(
-                    np.array(255.0 * empirical_dist, dtype=np.int32)
-                )
-                wandb.log(eval_info, commit=False)
-
-        if cfg_from_train_state.logging.use_wandb:
+                # Combine train and eval metrics for a single wandb.log call.
+                wandb.log({**eval_info, **train_info})
+        # If not a tracking step but W&B is enabled, log only training info.
+        elif cfg_from_train_state.logging.use_wandb:
             wandb.log(train_info)
 
     jax.debug.callback(
@@ -356,9 +429,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     )
 
 
-@hydra.main(
-    config_path="configs/", config_name="tb_hypergrid", version_base=None
-)
+@hydra.main(config_path="configs/", config_name="tb_amp", version_base=None)
 def run_experiment(cfg: OmegaConf) -> None:
     # Log the configuration
     log.info(OmegaConf.to_yaml(cfg))
@@ -367,26 +438,30 @@ def run_experiment(cfg: OmegaConf) -> None:
     env_init_key = jax.random.PRNGKey(cfg.env_init_seed)
     eval_init_key = jax.random.PRNGKey(cfg.eval_init_seed)
 
-    reward_module_factory = {
-        "easy": gfnx.EasyHypergridRewardModule,
-        "hard": gfnx.HardHypergridRewardModule,
-    }[cfg.environment.reward]
-    reward_module = reward_module_factory()
-
-    env = gfnx.environment.HypergridEnvironment(
-        reward_module, dim=cfg.environment.dim, side=cfg.environment.side
+    # Define the reward function for the environment
+    reward_module = gfnx.EqxProxyAMPRewardModule(
+        proxy_config_path=cfg.environment.proxy_config_path,
+        pretrained_proxy_path=cfg.environment.pretrained_proxy_path,
+        reward_exponent=cfg.environment.reward_exponent,
+        min_reward=cfg.environment.min_reward,
     )
+    # Initialize the environment and its inner parameters
+    env = gfnx.AMPEnvironment(reward_module)
     env_params = env.init(env_init_key)
 
     rng_key, net_init_key = jax.random.split(rng_key)
-    model = MLPPolicy(
-        input_size=env.observation_space.shape[0],
+    # Initialize the network
+    model = TransformerPolicy(
         n_fwd_actions=env.action_space.n,
         n_bwd_actions=env.backward_action_space.n,
-        hidden_size=cfg.network.hidden_size,
         train_backward_policy=cfg.agent.train_backward,
-        depth=cfg.network.depth,
-        rng_key=net_init_key,
+        encoder_params={
+            "pad_id": env.pad_token,
+            "vocab_size": env.ntoken,
+            "max_length": env.max_length,
+            **OmegaConf.to_container(cfg.network),
+        },
+        key=net_init_key,
     )
 
     # Initialize logZ separately
@@ -411,8 +486,36 @@ def run_experiment(cfg: OmegaConf) -> None:
     optimizer = optax.multi_transform(optimizer_defs, param_labels)
     opt_state = optimizer.init(initial_optax_params)
 
-    metrics_module = gfnx.metrics.HypergridMetricModule(
-        env, buffer_max_length=cfg.logging.metric_buffer_size
+    # Initialize the policy function for metrics computation
+    # This requires policy_static part of the model.
+    _, policy_static_for_metrics = eqx.partition(model, eqx.is_array)
+
+    def fwd_policy_fn_for_metrics(
+        fwd_rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
+    ) -> chex.Array:
+        # Recombine the network parameters with the static parts of the model
+        current_model_for_metrics = eqx.combine(
+            policy_params, policy_static_for_metrics
+        )
+        # The TransformerPolicy expects obs_ids.
+        # Dropout is disabled for metrics, so no key is needed.
+        del fwd_rng_key  # fwd_rng_key is not used when dropout is disabled
+        policy_outputs_for_metrics = jax.vmap(
+            lambda model, obs: model(obs, enable_dropout=False),
+            in_axes=(
+                None,
+                0,
+            ),  # current_model_for_metrics is fixed, map over env_obs
+        )(current_model_for_metrics, env_obs)
+        return policy_outputs_for_metrics[
+            "forward_logits"
+        ], policy_outputs_for_metrics
+
+    metrics_module = gfnx.metrics.AMPMetricModule(
+        env=env,
+        fwd_policy_fn=fwd_policy_fn_for_metrics,  # Use the specifically defined fwd_policy_fn
+        num_traj=cfg.metrics.num_traj,
+        batch_size=cfg.metrics.batch_size,
     )
     metrics = metrics_module.init(eval_init_key, env_params)
 
@@ -492,7 +595,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     }
 
     path = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    cwd = os.path.join(path, "model_and_logZ")  # Changed path name
+    cwd = os.path.join(path, "model_and_logZ")
     ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
     # Save the dictionary containing model parameters and logZ
     ckptr.save(cwd, args=ocp.args.StandardSave(final_params_to_save))
