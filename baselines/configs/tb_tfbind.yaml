@@ -6,11 +6,12 @@ num_train_steps: 1000000
 num_envs: 16
 
 agent:
-  learning_rate: 3e-4
+  learning_rate: 1e-3
+  logZ_learning_rate: 0.1 # New field
   start_eps: 1.0
   end_eps: 0.0
   exploration_steps: 50_000 # Should be <= of num_train_steps
-  train_backward: false
+  train_backward: true
 
 network:
   # Input size and output size are computed based on the environment
@@ -19,7 +20,7 @@ network:
 
 logging:
   track_each: 1 # in terms of total training steps, not divided by num_envs
-  eval_each: 500 # in terms of total training steps, not divited by num_envs
+  eval_each: 100 # in terms of total training steps, not divided by num_envs
   metric_buffer_size: 1000000
   tqdm_print_rate: 20
   use_wandb: True

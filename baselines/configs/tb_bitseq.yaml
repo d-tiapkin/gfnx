@@ -2,25 +2,43 @@ seed: 111
 env_init_seed: 1
 eval_init_seed: 2
 
-num_train_steps: 1000000
+num_train_steps: 50000
 num_envs: 16
 
 agent:
   learning_rate: 3e-4
+  logZ_learning_rate: 1e-2
   start_eps: 1.0
   end_eps: 0.0
   exploration_steps: 50_000 # Should be <= of num_train_steps
-  train_backward: false
+  train_backward: true
 
 network:
   # Input size and output size are computed based on the environment
-  hidden_size: 256
-  depth: 2
+  num_heads: 8
+  num_layers: 3
+
+  embedding_size: 64
+  hidden_size: 64
+  intermediate_size: 64
+
+  dropout_rate: 0.1
+  attention_dropout_rate: 0.1
+
+environment:
+  k: 8
+  n: 64
+  num_modes: 32
+  reward_exponent: 2.0
+
+metrics:
+  n_rounds : 10
+  batch_size : 16
+  mode_threshold : 10
 
 logging:
   track_each: 1 # in terms of total training steps, not divided by num_envs
-  eval_each: 500 # in terms of total training steps, not divited by num_envs
-  metric_buffer_size: 1000000
+  eval_each: 100 # in terms of total training steps, not divided by num_envs
   tqdm_print_rate: 20
   use_wandb: True
 
@@ -34,4 +52,4 @@ hydra:
   run:
     dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}
   sweep:
-    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S} 

@@ -22,12 +22,12 @@ import jax
 import jax.numpy as jnp
 import optax
 import orbax.checkpoint as ocp
+import wandb
 from jax_tqdm import loop_tqdm
 from jaxtyping import Array, Int
 from omegaconf import OmegaConf
-
+from optax.losses import squared_error
 import gfnx
-import wandb
 from gfnx.metrics.new import (
     ApproxDistributionMetricsModule,
     MultiMetricsModule,
@@ -69,13 +69,11 @@ class MLPPolicy(eqx.Module):
             output_size += n_bwd_actions
 
         encoder_key, pooler_key = jax.random.split(key)
-        self.encoder = eqx.nn.MLP(
-            in_size=5 * 8,
-            out_size=encoder_params["hidden_size"],
-            width_size=encoder_params["hidden_size"],
-            depth=encoder_params["depth"],
-            key=encoder_key,
-        )
+        self.encoder = eqx.nn.MLP(in_size=5 * 8, 
+                                  out_size=encoder_params["hidden_size"], 
+                                  width_size=encoder_params["hidden_size"], 
+                                  depth=encoder_params["depth"], 
+                                  key=encoder_key)
         self.pooler = eqx.nn.Linear(
             in_features=encoder_params["hidden_size"],
             out_features=output_size,
@@ -97,11 +95,15 @@ class MLPPolicy(eqx.Module):
                 output, [self.n_fwd_actions, self.n_fwd_actions + 1], axis=-1
             )
         else:
-            forward_logits, flow = jnp.split(output, [self.n_fwd_actions], axis=-1)
-            backward_logits = jnp.zeros(shape=(self.n_bwd_actions,), dtype=jnp.float32)
+            forward_logits, flow = jnp.split(
+                output, [self.n_fwd_actions], axis=-1
+            )
+            backward_logits = jnp.zeros(
+                shape=(self.n_bwd_actions,), dtype=jnp.float32
+            )
         return {
             "forward_logits": forward_logits,
-            "log_flow": flow.squeeze(-1),
+            "log_flow": flow,
             "backward_logits": backward_logits,
         }
 
@@ -119,7 +121,6 @@ class TrainState(NamedTuple):
     metrics_state: MultiMetricsState
     exploration_schedule: optax.Schedule
 
-
 @eqx.filter_jit
 def train_step(idx: int, train_state: TrainState) -> TrainState:
     rng_key = train_state.rng_key
@@ -129,9 +130,13 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     # Step 1. Generate a batch of trajectories and split to transitions
     rng_key, sample_traj_key = jax.random.split(train_state.rng_key)
     # Split the model to pass into forward rollout
-    policy_params, policy_static = eqx.partition(train_state.model, eqx.is_array)
+    policy_params, policy_static = eqx.partition(
+        train_state.model, eqx.is_array
+    )
 
+    # Get epsilon exploration value from config
     cur_eps = train_state.exploration_schedule(idx)
+    
     # Define the policy function suitable for gfnx.utils.forward_rollout
     def fwd_policy_fn(
         fwd_rng_key: chex.PRNGKey,
@@ -151,8 +156,8 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             rng_key, exploration_key = jax.random.split(fwd_rng_key)
             batch_size, _ = fwd_logits.shape
             exploration_mask = jax.random.bernoulli(
-            exploration_key, cur_eps, (batch_size,)
-        )
+                exploration_key, cur_eps, (batch_size,)
+            )
             fwd_logits = jnp.where(exploration_mask[..., None], 0, fwd_logits)
         # Update policy outputs with modified logits
         policy_outputs = policy_outputs.copy()
@@ -169,62 +174,107 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         env=train_state.env,
         env_params=train_state.env_params,
     )
-    transitions = gfnx.utils.split_traj_to_transitions(traj_data)
-    bwd_actions = train_state.env.get_backward_action(
-        transitions.state,
-        transitions.action,
-        transitions.next_state,
-        train_state.env_params,
-    )
-
     # Step 2. Compute the loss
-    def loss_fn(model: MLPPolicy) -> chex.Array:
-        # Call the network to get the logits
-        policy_outputs = jax.vmap(model, in_axes=(0,))(transitions.obs)
-        # Compute the forward log-probs
-        fwd_logits = policy_outputs["forward_logits"]
-        invalid_mask = env.get_invalid_mask(transitions.state, env_params)
-        masked_fwd_logits = gfnx.utils.mask_logits(fwd_logits, invalid_mask)
-        fwd_all_log_probs = jax.nn.log_softmax(masked_fwd_logits, axis=-1)
-        fwd_logprobs = jnp.take_along_axis(
-            fwd_all_log_probs,
-            jnp.expand_dims(transitions.action, axis=-1),
-            axis=-1,
-        ).squeeze(-1)
-        log_flow = policy_outputs["log_flow"]
+    def loss_fn(
+        current_all_params: dict,
+        static_model_parts: MLPPolicy,
+        current_traj_data: gfnx.utils.TrajectoryData,
+        current_env: gfnx.HypergridEnvironment,
+        current_env_params: gfnx.HypergridEnvParams,
+    ):
+        model_learnable_params = current_all_params["model_params"]
+        model_to_call = eqx.combine(model_learnable_params, static_model_parts)
+        # Compute policy outputs for the whole trajectory
+        policy_outputs_traj = jax.vmap(jax.vmap(model_to_call))(current_traj_data.obs)
+        fwd_logits_traj = policy_outputs_traj["forward_logits"]
+        bwd_logits_traj = policy_outputs_traj["backward_logits"]
+        log_flow_traj = policy_outputs_traj["log_flow"].squeeze(-1)
 
-        # Compute the stats for the next state
-        next_policy_outputs = jax.vmap(model, in_axes=(0,))(transitions.next_obs)
-        bwd_logits = next_policy_outputs["backward_logits"]
-        next_bwd_invalid_mask = env.get_invalid_backward_mask(transitions.next_state, env_params)
-        masked_bwd_logits = gfnx.utils.mask_logits(bwd_logits, next_bwd_invalid_mask)
-        bwd_all_log_probs = jax.nn.log_softmax(masked_bwd_logits, axis=-1)
-        bwd_logprobs = jnp.take_along_axis(
-            bwd_all_log_probs, jnp.expand_dims(bwd_actions, axis=-1), axis=-1
-        ).squeeze(-1)
-        next_log_flow = next_policy_outputs["log_flow"]
-        # Replace the target with the log_gfn_reward if the episode is done
-        target = jnp.where(
-            transitions.done,
-            bwd_logprobs + transitions.log_gfn_reward,
-            bwd_logprobs + next_log_flow,
-        )
+        batch_size, traj_len_plus1 = current_traj_data.action.shape
+        traj_len = traj_len_plus1 - 1
 
-        # Compute the DB loss with masking
-        loss = optax.l2_loss(
-            jnp.where(transitions.pad, 0.0, fwd_logprobs + log_flow),
-            jnp.where(transitions.pad, 0.0, target),
+        # Masks
+        forward_invalid_mask = jax.vmap(
+            current_env.get_invalid_mask, in_axes=(1, None), out_axes=1
+        )(current_traj_data.state, current_env_params)
+        backward_invalid_mask = jax.vmap(
+            current_env.get_invalid_backward_mask, in_axes=(1, None), out_axes=1
+        )(current_traj_data.state, current_env_params)
+        forward_action = current_traj_data.action[:, :-1]
+        # Compute backward actions
+        prev_states = jax.tree.map(lambda x: x[:, :-1], current_traj_data.state)
+        fwd_actions = current_traj_data.action[:, :-1]
+        curr_states = jax.tree.map(lambda x: x[:, 1:], current_traj_data.state)
+        bwd_actions_traj = jax.vmap(
+            current_env.get_backward_action,
+            in_axes=(1, 1, 1, None),
+            out_axes=1,
+        )(prev_states, fwd_actions, curr_states, current_env_params)
+        pad_mask = current_traj_data.pad[:, :-1]
+        done_mask = current_traj_data.done[:, :-1]
+
+        # Forward log-probs
+        pf_logits = gfnx.utils.mask_logits(fwd_logits_traj, forward_invalid_mask)
+        log_pf = jax.nn.log_softmax(pf_logits, axis=-1)[:, :-1]
+        log_pf_along_traj = jnp.take_along_axis(
+            log_pf, jnp.expand_dims(forward_action, axis=-1), axis=-1
+        ).squeeze(-1)
+        log_pf_along_traj = jnp.where(pad_mask, 0.0, log_pf_along_traj)
+
+        # Backward log-probs
+        pb_logits = gfnx.utils.mask_logits(bwd_logits_traj, backward_invalid_mask)
+        log_pb = jax.nn.log_softmax(pb_logits, axis=-1)[:, 1:]
+        log_pb_along_traj = jnp.take_along_axis(
+            log_pb, jnp.expand_dims(bwd_actions_traj, axis=-1), axis=-1
+        ).squeeze(-1)
+        log_pb_along_traj = jnp.where(pad_mask, 0.0, log_pb_along_traj)
+        log_pb_along_traj = log_pb_along_traj +\
+            jnp.where(pad_mask, 0.0, current_traj_data.log_gfn_reward[:, :-1])
+
+        # log_flow
+        log_flow = jnp.where(current_traj_data.pad, 0.0, log_flow_traj)
+
+        def process_one_traj(log_pf, log_pb, log_flow, done, pad):
+            def process_pair_idx(i, j, log_pf, log_pb, log_flow, done, pad):
+                def fn():
+                    mask = jnp.logical_and(i <= jnp.arange(traj_len), jnp.arange(traj_len) < j)
+                    weight = jnp.power(train_state.config.agent.lmbd, j - i)
+                    log_flow_start = log_flow[i]
+                    log_pf_subtraj = log_flow_start + (log_pf * mask).sum()
+                    log_flow_finish = jnp.where(done[j - 1], 0.0, log_flow[j])
+                    log_pb_subtraj = log_flow_finish + (log_pb * mask).sum()
+                    return weight * squared_error(log_pf_subtraj, log_pb_subtraj), weight
+                return jax.lax.cond(pad[j - 1], lambda: (0.0, 0.0), fn)
+            i, j = jnp.triu_indices(traj_len + 1, k=1)
+            weighted_loss, weighted_norm = jax.vmap(
+                process_pair_idx, in_axes=(0, 0, None, None, None, None, None)
+            )(i, j, log_pf, log_pb, log_flow, done, pad)
+            return weighted_loss.sum() / weighted_norm.sum()
+
+        loss = jax.vmap(process_one_traj)(
+            log_pf_along_traj,
+            log_pb_along_traj,
+            log_flow,
+            done_mask,
+            pad_mask,
         ).mean()
         return loss
 
-    mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(train_state.model)
-    # Step 3. Update the model with grads
-    updates, opt_state = train_state.optimizer.update(
-        grads,
-        train_state.opt_state,
-        eqx.filter(train_state.model, eqx.is_array),
+    # Prepare parameters for the loss function and gradient calculation
+    params_for_loss = {"model_params": policy_params}
+
+    mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(
+        params_for_loss, policy_static, traj_data, env, env_params
     )
-    model = eqx.apply_updates(train_state.model, updates)
+
+    # Step 3. Update parameters
+    optax_params_for_update = {"model_params": policy_params}
+    updates, new_opt_state = train_state.optimizer.update(
+        grads, train_state.opt_state, optax_params_for_update
+    )
+
+    # Apply updates
+    new_model = eqx.apply_updates(train_state.model, updates["model_params"])
     # Peform all the requied logging
     rewards = env.reward_module.reward(
         log_info["final_env_state"],
@@ -297,18 +347,15 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         metrics_state,
         train_state.config,
         ordered=True,
-    )
+    )    
 
     # Return the updated train state
     return train_state._replace(
-        rng_key=rng_key,
-        model=model,
-        opt_state=opt_state,
-        metrics_state=metrics_state,
+        rng_key=rng_key, model=new_model, opt_state=new_opt_state, metrics_state=metrics_state
     )
 
 
-@hydra.main(config_path="configs/", config_name="db_tfbind", version_base=None)
+@hydra.main(config_path="configs/", config_name="subtb_tfbind", version_base=None)
 def run_experiment(cfg: OmegaConf) -> None:
     # Log the configuration
     log.info(OmegaConf.to_yaml(cfg))
@@ -340,16 +387,27 @@ def run_experiment(cfg: OmegaConf) -> None:
         },
         key=net_init_key,
     )
-
     exploration_schedule = optax.linear_schedule(
         init_value=cfg.agent.start_eps,
         end_value=cfg.agent.end_eps,
         transition_steps=cfg.agent.exploration_steps,
     )
 
-    # Initialize the optimizer
-    optimizer = optax.adam(learning_rate=cfg.agent.learning_rate)
-    opt_state = optimizer.init(eqx.filter(model, eqx.is_array))
+    model_params_init = eqx.filter(model, eqx.is_array)
+    initial_optax_params = {"model_params": model_params_init}
+
+    # Define parameter labels for multi_transform
+    param_labels = {
+        "model_params": jax.tree.map(
+            lambda _: "network_lr", model_params_init
+        ),
+    }
+
+    optimizer_defs = {
+        "network_lr": optax.adam(learning_rate=cfg.agent.learning_rate),
+    }
+    optimizer = optax.multi_transform(optimizer_defs, param_labels)
+    opt_state = optimizer.init(initial_optax_params)
 
     metrics_module = MultiMetricsModule(
         metrics={
@@ -376,6 +434,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         ),
     )
 
+
     train_state = TrainState(
         rng_key=rng_key,
         config=cfg,
@@ -389,7 +448,9 @@ def run_experiment(cfg: OmegaConf) -> None:
         exploration_schedule=exploration_schedule,
     )
     # Split train state into parameters and static parts to make jit work.
-    train_state_params, train_state_static = eqx.partition(train_state, eqx.is_array)
+    train_state_params, train_state_static = eqx.partition(
+        train_state, eqx.is_array
+    )
 
     @functools.partial(jax.jit, donate_argnums=(1,))
     @loop_tqdm(cfg.num_train_steps, print_rate=cfg.logging["tqdm_print_rate"])
@@ -405,9 +466,11 @@ def run_experiment(cfg: OmegaConf) -> None:
         wandb.init(
             entity=cfg.wandb.entity,
             project=cfg.wandb.project,
-            tags=["DB", env.name.upper()],
+            tags=["SubTB", env.name.upper()],
         )
-        wandb.config.update(OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True))
+        wandb.config.update(
+            OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
+        )
 
     log.info("Start training")
     # Run the training loop via jax lax.fori_loop
@@ -418,17 +481,12 @@ def run_experiment(cfg: OmegaConf) -> None:
         init_val=train_state_params,
     )
     jax.block_until_ready(train_state_params)
-    train_state = eqx.combine(train_state_params, train_state_static)
-    model = train_state.model
-    model_params = eqx.filter(model, eqx.is_array)
 
     # Save the final model
     path = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    cwd_train_state = os.path.join(path, "train_state")
-    cwd_model = os.path.join(path, "model")
+    cwd = os.path.join(path, "model")
     ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
-    ckptr.save(cwd_train_state, args=ocp.args.StandardSave(train_state_params))
-    ckptr.save(cwd_model, args=ocp.args.StandardSave(model_params))
+    ckptr.save(cwd, args=ocp.args.StandardSave(train_state_params))
     ckptr.wait_until_finished()
 
 
