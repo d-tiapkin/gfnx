@@ -17,7 +17,8 @@ dependencies = [
   "numpy==1.26.4",
   "jaxtyping",
   "networkx",
-  "omegaconf"
+  "omegaconf",
+  "matplotlib"
 ]
 authors = [
   { name="Daniil Tiapkin", email="daniil.tiapkin@polytechnique.edu" },

@@ -392,3 +392,25 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         if not self.is_ground_truth_sampling_tractable:
             raise ValueError(f"GT sampling for environment {self.name} is not tractable")
         raise NotImplementedError
+
+
+class BaseRenderer(ABC, Generic[TEnvState]):
+    """
+    Base class for rendering environments.
+    """
+
+    @abstractmethod
+    def init_state(self, state: TEnvState):
+        """Initialize visual representation of the given state."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def transition(self, state: TEnvState, next_state: TEnvState, action: TAction):
+        """Update visualization for state transition."""
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def figure(self):
+        """Return the current figure for rendering."""
+        raise NotImplementedError

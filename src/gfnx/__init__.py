@@ -55,6 +55,7 @@ from .reward import (
     TFBind8RewardModule,
     QM9SmallRewardModule,
 )
+from .visualize import Visualizer
 
 __all__ = [
     "metrics",
@@ -106,6 +107,7 @@ __all__ = [
     "DAGEnvState",
     "DAGEnvParams",
     "DAGRewardModule",
+    "Visualizer",
 ]
 
 # Lazy import of networks since networks are based on Equinox

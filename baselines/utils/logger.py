@@ -103,7 +103,7 @@ class Writer:
         self,
         writer_type: str | None = None,
         save_locally: bool = False,
-        log_dir: str | None = None,
+        log_dir: str = "logs/",
         config: dict | None = None,
         **kwargs,
     ):
@@ -112,16 +112,13 @@ class Writer:
         Args:
             writer_type: Backend type ("wandb", "trackio", or None)
             save_locally: Whether to save logs locally
-            log_dir: Local log directory (required if save_locally=True)
+            log_dir: Path to the log directory (default: "logs/")
             config: Configuration dict to save and pass to backend
             **kwargs: Backend-specific initialization arguments
         """
         assert writer_type in self.SUPPORTED_TYPES, (
             f"Writer type {writer_type} is not supported. "
             f"Supported types are: {self.SUPPORTED_TYPES}."
-        )
-        assert not (save_locally and log_dir is None), (
-            "If save_locally is True, log_dir must be specified."
         )
 
         if writer_type == "wandb":
@@ -131,14 +128,14 @@ class Writer:
         elif writer_type is None:
             self.backend = None
 
-        self.log_dir = log_dir if save_locally else None
-        self.image_dir = os.path.join(self.log_dir, "images/")
-        os.makedirs(self.image_dir, exist_ok=True)
+        self.save_locally = save_locally
+        self.log_dir = log_dir
+        os.makedirs(self.log_dir, exist_ok=True)
 
         self._step = 0
         self._image_counter = 0
 
-        if self.log_dir:
+        if self.save_locally:
             self._save_json("config.json", config)
 
     def log(self, data: dict, **kwargs):
@@ -148,7 +145,7 @@ class Writer:
             data: Dictionary of metrics and values to log
             **kwargs: Additional arguments for backend logging
         """
-        if self.log_dir:
+        if self.save_locally:
             self._save_logs(data)
 
         if self.backend:
@@ -201,7 +198,8 @@ class Writer:
             str: Path to saved image file
         """
 
-        image_path = os.path.join(self.image_dir, f"image_{self._image_counter:04d}.png")
+        image_path = os.path.join(self.log_dir, "images/", f"image_{self._image_counter:04d}.png")
+        os.makedirs(os.path.dirname(image_path), exist_ok=True)
         self._image_counter += 1
         image.save(image_path)
 
