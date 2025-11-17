@@ -23,11 +23,13 @@ logging:
   eval_each: 100 # in terms of total training steps, not divided by num_envs
   metric_buffer_size: 1000000
   tqdm_print_rate: 20
-  use_wandb: True
+  use_writer: true
 
-# Technical information for wandb
-wandb:
-  entity: NULL
+# Technical information for writer
+writer:
+  writer_type: wandb # wandb, trackio or null (no logging online)
+  save_locally: false # Save metrics locally or not
+  entity: null
   project: EPS
 
 # Technical information for hydra

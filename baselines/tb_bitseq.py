@@ -21,13 +21,11 @@ import hydra
 import jax
 import jax.numpy as jnp
 import optax
-import orbax.checkpoint as ocp
 from jax_tqdm import loop_tqdm
 from jaxtyping import Array, Int
 from omegaconf import OmegaConf
 
 import gfnx
-import wandb
 from gfnx.metrics.new import (
     AccumulatedModesMetricsModule,
     MultiMetricsModule,
@@ -35,8 +33,12 @@ from gfnx.metrics.new import (
     TestCorrelationMetricsModule,
 )
 
+from utils.logger import Writer
+from utils.checkpoint import save_checkpoint
+
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
+writer = Writer()
 
 
 class TransformerPolicy(eqx.Module):
@@ -316,11 +318,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             eval_info = train_state.metrics_module.get(metrics_state)
             eval_info = {f"eval/{key}": float(value) for key, value in eval_info.items()}
             log.info(eval_info)
-            if cfg.logging.use_wandb:
-                wandb.log(eval_info, commit=False)
+            if cfg.logging.use_writer:
+                writer.log(eval_info, commit=False)
 
-        if cfg.logging.use_wandb and idx % cfg.logging.track_each == 0:
-            wandb.log(train_info)
+        if cfg.logging.use_writer and idx % cfg.logging.track_each == 0:
+            writer.log(train_info)
 
     jax.debug.callback(
         logging_callback,
@@ -486,14 +488,20 @@ def run_experiment(cfg: OmegaConf) -> None:
         train_state_params, _ = eqx.partition(train_state, eqx.is_array)
         return train_state_params
 
-    if cfg.logging.use_wandb:
-        log.info("Initialize wandb")
-        wandb.init(
-            entity=cfg.wandb.entity,
-            project=cfg.wandb.project,
-            tags=["TB", env.name.upper()],
+    if cfg.logging.use_writer:
+        log.info("Initialize writer")
+        log_dir = os.path.join(
+            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
         )
-        wandb.config.update(OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True))
+        writer.init(
+            writer_type=cfg.writer.writer_type,
+            save_locally=cfg.writer.save_locally,
+            log_dir=log_dir,
+            entity=cfg.writer.entity,
+            project=cfg.writer.project,
+            tags=["TB", env.name.upper()],
+            config=OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True),
+        )
 
     log.info("Start training")
     # Run the training loop via jax lax.fori_loop
@@ -505,21 +513,19 @@ def run_experiment(cfg: OmegaConf) -> None:
     )
     jax.block_until_ready(train_state_params)
 
-    # Reconstruct the final train state to access model and logZ
-    final_train_state = eqx.combine(train_state_params, train_state_static)
-
-    # Save the final model and logZ
-    final_model_params = eqx.filter(final_train_state.model, eqx.is_array)
-    final_params_to_save = {
-        "model_params": final_model_params,
-        "logZ": final_train_state.logZ,
-    }
-
-    path = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    cwd = os.path.join(path, "model_and_logZ")
-    ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
-    ckptr.save(cwd, args=ocp.args.StandardSave(final_params_to_save))
-    ckptr.wait_until_finished()
+    # Save the final model
+    train_state = eqx.combine(train_state_params, train_state_static)
+    dir = os.path.join(
+        hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
+        f"checkpoints_{os.getpid()}/",
+    )
+    save_checkpoint(
+        os.path.join(dir, "model_and_logZ"),
+        {
+            "model": train_state.model,
+            "logZ": train_state.logZ,
+        },
+    )
 
 
 if __name__ == "__main__":

@@ -22,15 +22,17 @@ import jax
 import jax.numpy as jnp
 import jraph
 import optax
-import orbax.checkpoint as ocp
-import wandb
 from jax_tqdm import loop_tqdm
 from omegaconf import OmegaConf
 
 import gfnx
 
+from utils.logger import Writer
+from utils.checkpoint import save_checkpoint
+
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
+writer = Writer()
 
 
 class GNNPolicy(eqx.Module):
@@ -431,11 +433,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             log.info(f"Step {idx}")
             log.info({key: float(value) for key, value in train_info.items()})
             log.info({key: float(value) for key, value in eval_info.items()})
-            if train_state.config.logging.use_wandb:
-                wandb.log(eval_info, commit=False)
+            if train_state.config.logging.use_writer:
+                writer.log(eval_info, commit=False)
 
-        if train_state.config.logging.use_wandb:
-            wandb.log(train_info)
+        if train_state.config.logging.use_writer:
+            writer.log(train_info)
 
     jax.debug.callback(
         logging_callback,
@@ -569,14 +571,20 @@ def run_experiment(cfg: OmegaConf) -> None:
         train_state_params, _ = eqx.partition(train_state, eqx.is_array)
         return train_state_params
 
-    if cfg.logging.use_wandb:
-        log.info("Initialize wandb")
-        wandb.init(
-            entity=cfg.wandb.entity,
-            project=cfg.wandb.project,
-            tags=["MDB", env.name.upper()],
+    if cfg.logging.use_writer:
+        log.info("Initialize writer")
+        log_dir = os.path.join(
+            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
         )
-        wandb.config.update(OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True))
+        writer.init(
+            writer_type=cfg.writer.writer_type,
+            save_locally=cfg.writer.save_locally,
+            log_dir=log_dir,
+            entity=cfg.writer.entity,
+            project=cfg.writer.project,
+            tags=["MDB", env.name.upper()],
+            config=OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True),
+        )
 
     log.info("Start training")
     # Run the training loop via jax.lax.fori_loop
@@ -589,11 +597,12 @@ def run_experiment(cfg: OmegaConf) -> None:
     jax.block_until_ready(train_state_params)
 
     # Save the final model
-    path = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    cwd = os.path.join(path, "model")
-    ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
-    ckptr.save(cwd, train_state_params)
-    ckptr.wait_until_finished()
+    train_state = eqx.combine(train_state_params, train_state_static)
+    dir = os.path.join(
+        hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
+        f"checkpoints_{os.getpid()}/",
+    )
+    save_checkpoint(os.path.join(dir, "train_state"), train_state)
 
 
 if __name__ == "__main__":

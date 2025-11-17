@@ -20,10 +20,12 @@ logging:
   eval_each: 500  # evaluation frequency
   metric_buffer_size: 1000000
   tqdm_print_rate: 20
-  use_wandb: False
+  use_writer: false
 
-# Technical information for wandb
-wandb:
+# Technical information for writer
+writer:
+  writer_type: wandb # wandb, trackio or null (no logging online)
+  save_locally: false # Save metrics locally or not
   entity: gfn-sampling
   project: mctx
 
