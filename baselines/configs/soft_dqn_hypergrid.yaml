@@ -1,0 +1,45 @@
+seed: 1
+env_init_seed: 1
+eval_init_seed: 2
+
+num_train_steps: 62500
+num_envs: 16
+
+agent:
+  learning_rate: 1e-3
+  eps_exploration: 0.00
+  dueling: true
+  target_update_every: 1
+  target_update_tau: 0.25
+  leaf_coeff: 5
+
+network:
+  # Input size and output size are computed based on the environment
+  hidden_size: 256
+  depth: 2
+
+environment:
+  reward: "easy"
+  dim: 2
+  side: 10
+
+logging:
+  track_each: 1 # in terms of total training steps, not divided by num_envs
+  eval_each: 500 # in terms of total training steps, not divided by num_envs
+  metric_buffer_size: 200000
+  tqdm_print_rate: 20
+  use_writer: true
+
+# Technical information for writer
+writer:
+  writer_type: wandb # wandb, trackio or null (no logging online)
+  save_locally: true # Save metrics locally or not
+  entity: null
+  project: soft-dqn-hypergrid-comparison
+
+# Technical information for hydra
+hydra:
+  run:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}
