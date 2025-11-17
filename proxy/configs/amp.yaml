@@ -1,11 +1,11 @@
 # Follows https://arxiv.org/pdf/2209.12782#page=13.82
 dataset:
-  _target_: datasets.amp.AMPRewardProxyDataset
+  _target_: proxy.datasets.amp.AMPRewardProxyDataset
   split: 'D'
   nfold: 5
 
 network:
-  _target_: model.transformer.TransformerRewardModel # TODO:FIXME
+  _target_: proxy.model.transformer.TransformerRewardModel # TODO:FIXME
   encoder_config:
     max_len: 60
     num_heads: 8
