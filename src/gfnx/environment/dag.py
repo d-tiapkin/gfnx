@@ -3,7 +3,7 @@ from typing import Any, Dict, Tuple
 import chex
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Int
+from jaxtyping import Array, Bool
 
 from gfnx.base import (
     BaseEnvParams,
@@ -23,7 +23,6 @@ from ..utils.dag import construct_all_dags, uint8bits_to_int32
 class EnvState(BaseEnvState):
     adjacency_matrix: Bool[Array, " batch_size num_variables num_variables"]
     closure_T: Bool[Array, " batch_size num_variables num_variables"]
-    time: Int[Array, " batch_size"]
     is_terminal: Bool[Array, " batch_size"]
     is_initial: Bool[Array, " batch_size"]
     is_pad: Bool[Array, " batch_size"]
@@ -75,7 +74,6 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
                 jnp.eye(self.num_variables, dtype=jnp.bool),
                 (num_envs, 1, 1),
             ),
-            time=jnp.zeros((num_envs,), dtype=jnp.int32),
             is_terminal=jnp.zeros((num_envs,), dtype=jnp.bool),
             is_initial=jnp.ones((num_envs,), dtype=jnp.bool),
             is_pad=jnp.zeros((num_envs,), dtype=jnp.bool),
@@ -100,7 +98,6 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         env_params: EnvParams,
     ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
         is_terminal = state.is_terminal
-        time = state.time
 
         def get_state_terminal() -> EnvState:
             return state.replace(is_pad=True)
@@ -111,7 +108,7 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             return jax.lax.cond(done, get_state_finished, get_state_inter, source, target)
 
         def get_state_finished(source: chex.Array, target: chex.Array) -> EnvState:
-            return state.replace(time=time + 1, is_terminal=True, is_initial=False)
+            return state.replace(is_terminal=True, is_initial=False)
 
         def get_state_inter(source: chex.Array, target: chex.Array) -> EnvState:
             adjacency_matrix = state.adjacency_matrix.at[source, target].set(True)
@@ -124,7 +121,6 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             return state.replace(
                 adjacency_matrix=adjacency_matrix,
                 closure_T=closure_T,
-                time=time + 1,
                 is_terminal=False,
                 is_initial=False,
             )
@@ -182,7 +178,6 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         Removing an edge is equivalent to adding a 'phantom' edge.
         """
         is_initial = state.is_initial
-        time = state.time
 
         def get_state_initial() -> EnvState:
             return state.replace(is_pad=True)
@@ -193,7 +188,6 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
 
         def get_state_terminating() -> EnvState:
             return state.replace(
-                time=time - 1,
                 is_terminal=False,
                 is_initial=jnp.all(jnp.logical_not(state.adjacency_matrix)),
                 is_pad=False,
@@ -206,7 +200,6 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             return state.replace(
                 adjacency_matrix=adjacency_matrix,
                 closure_T=closure_T,
-                time=time - 1,
                 is_terminal=False,
                 is_initial=jnp.all(jnp.logical_not(adjacency_matrix)),
                 is_pad=False,
@@ -241,7 +234,7 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         Constructed as a logical or of adjacency matrix and
         transitive closure of transposed adjacency matrix.
         """
-        num_envs = state.time.shape[0]
+        num_envs = state.is_pad.shape[0]
         mask = jnp.logical_or(state.adjacency_matrix, state.closure_T).reshape(num_envs, -1)
         mask = jnp.concatenate(
             [mask, jnp.zeros((num_envs, 1), dtype=jnp.bool)], axis=1
@@ -308,7 +301,6 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
                 shape=(self.num_variables, self.num_variables),
                 dtype=jnp.bool,
             ),
-            "time": spaces.Discrete(self.max_steps_in_episode),
             "is_terminal": spaces.Box(low=0, high=1, shape=(), dtype=jnp.bool),
             "is_initial": spaces.Box(low=0, high=1, shape=(), dtype=jnp.bool),
             "is_pad": spaces.Box(low=0, high=1, shape=(), dtype=jnp.bool),
@@ -331,7 +323,6 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             lambda x: EnvState(
                 adjacency_matrix=x,
                 closure_T=self._single_compute_closure(x),
-                time=0,
                 is_terminal=True,
                 is_initial=False,
                 is_pad=False,

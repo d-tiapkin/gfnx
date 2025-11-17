@@ -66,7 +66,7 @@ class BaseDAGLikelihood:
         Returns:
         - TLogReward, shape [B], batch of delta-scores
         """
-        arange = jnp.arange(state.time.shape[0])  # [B]
+        arange = jnp.arange(state.is_pad.shape[0])  # [B]
         source, target = jnp.divmod(action, env_params.num_variables)
         parents = state.adjacency_matrix[arange, :, target]  # [B, num_variables]
         next_parents = next_state.adjacency_matrix[arange, :, target]  # [B, num_variables]
@@ -102,7 +102,7 @@ class ZeroScore(BaseDAGLikelihood):
         next_state: DAGEnvState,
         env_params: DAGEnvParams,
     ) -> TLogReward:
-        return jnp.zeros(state.time.shape[0])  # [B]
+        return jnp.zeros(state.is_pad.shape[0])  # [B]
 
     def _local_score(
         self, variables: chex.Array, parents: chex.Array, likelihood_params: TRewardParams

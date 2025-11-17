@@ -47,7 +47,6 @@ class QM9SmallEnvironment(FixedPrependAppendSequenceEnvironment):
             state = jnp.unravel_index(idx, shape=rewards.shape)  # Unpack index to state
             env_state = EnvState(
                 tokens=jnp.array(state),
-                time=0,
                 is_terminal=True,
                 is_initial=False,
                 is_pad=False,

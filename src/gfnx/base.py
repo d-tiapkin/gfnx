@@ -25,7 +25,6 @@ TDone = chex.Array
 
 @chex.dataclass(frozen=True)
 class BaseEnvState:
-    time: Int[Array, " batch_size"]
     is_terminal: Bool[Array, " batch_size"]
     is_initial: Bool[Array, " batch_size"]
     is_pad: Bool[Array, " batch_size"]
@@ -131,7 +130,7 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         log_reward = jax.lax.cond(
             jnp.any(new_dones),
             self.reward_module.log_reward,
-            lambda state, _: jnp.zeros_like(state.time, dtype=jnp.float32),
+            lambda state, _: jnp.zeros_like(state.is_pad, dtype=jnp.float32),
             next_state,  # Args for log_reward
             env_params,  # Args for log_reward
         )
@@ -157,7 +156,7 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         state, done, info = self.backward_transition(state, backward_action, env_params)
         done = jnp.astype(done, jnp.bool)  # Ensure that done is boolean
         # log reward is always zero for backward steps
-        log_rewards = jnp.zeros(state.time.shape, dtype=jnp.float32)
+        log_rewards = jnp.zeros(state.is_pad.shape, dtype=jnp.float32)
         return self.get_obs(state, env_params), state, log_rewards, done, info
 
     def reset(self, num_envs: int, env_params: TEnvParams) -> Tuple[TObs, TEnvState]:

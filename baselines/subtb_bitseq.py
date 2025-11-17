@@ -27,7 +27,7 @@ from omegaconf import OmegaConf
 from optax.losses import squared_error
 
 import gfnx
-from gfnx.metrics.new import (
+from gfnx.metrics import (
     AccumulatedModesMetricsModule,
     MultiMetricsModule,
     MultiMetricsState,
@@ -172,6 +172,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         env=env,
         env_params=env_params,
     )
+    # Compute the RL reward / ELBO (for logging purposes)
+    _, log_pb_traj = gfnx.utils.forward_trajectory_log_probs(
+        env, traj_data, env_params
+    )
+    rl_reward = log_pb_traj + aux_info["log_gfn_reward"] + aux_info["entropy"]
 
     # Step 2. Compute the SubTB loss
     def loss_fn(
@@ -351,7 +356,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             "grad_norm": optax.tree_utils.tree_l2_norm(grads),
             "mean_reward": jnp.exp(aux_info["log_gfn_reward"]).mean(),
             "mean_log_reward": aux_info["log_gfn_reward"].mean(),
-            "rl_reward": aux_info["log_gfn_reward"].mean() + aux_info["entropy"].mean(),
+            "rl_reward": rl_reward.mean(),
         },
         eval_info,
         train_state.config,

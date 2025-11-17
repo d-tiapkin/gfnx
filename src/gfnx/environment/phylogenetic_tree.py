@@ -28,7 +28,6 @@ class EnvState:
     is_terminal: chex.Array  # [B]
     is_initial: chex.Array  # [B]
     is_pad: chex.Array  # [B]
-    time: chex.Array  # [B]
 
 
 @chex.dataclass(frozen=True)
@@ -105,7 +104,6 @@ class PhyloTreeEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             is_terminal=jnp.zeros((num_envs,), dtype=jnp.bool_),
             is_initial=jnp.ones((num_envs,), dtype=jnp.bool_),
             is_pad=jnp.zeros((num_envs,), dtype=jnp.bool_),
-            time=jnp.zeros((num_envs,), dtype=jnp.int32),
         )
 
     def init(self, rng_key: chex.PRNGKey) -> EnvParams:
@@ -123,7 +121,6 @@ class PhyloTreeEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
     ) -> Tuple[EnvState, TDone, Dict[str, Any]]:
         """Single environment step transition"""
         is_terminal = state.is_terminal
-        time = state.time
 
         def get_state_terminal() -> EnvState:
             return state.replace(is_pad=True)
@@ -151,7 +148,6 @@ class PhyloTreeEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
                     .set(-1),  # remove right
                 to_leaf=state.to_leaf.at[state.length].set(self.lefts[action]),
                 length=state.length + 1,
-                time=time + 1,
                 is_initial=False,
             )
             # fmt: on
@@ -169,7 +165,6 @@ class PhyloTreeEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
     ) -> Tuple[EnvState, chex.Array, Dict[str, Any]]:
         """Single environment step backward transition"""
         is_initial = state.is_initial
-        time = state.time
 
         def get_state_initial() -> EnvState:
             return state.replace(is_pad=True)
@@ -194,7 +189,6 @@ class PhyloTreeEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
                     .at[state.to_leaf[right_child]]
                     .set(right_child),
                 to_leaf=state.to_leaf.at[root].set(-1),
-                time=time - 1,
                 is_terminal=False,
                 is_pad=False,
             )
@@ -340,7 +334,7 @@ class PhyloTreeEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
     ) -> TAction:
         """Returns forward action given the backward transition"""
 
-        batch_idx = jnp.arange(state.time.shape[0])
+        batch_idx = jnp.arange(state.is_pad.shape[0])
         left = state.to_leaf[
             batch_idx,
             state.left_child[batch_idx, state.to_root[batch_idx, backward_action]],

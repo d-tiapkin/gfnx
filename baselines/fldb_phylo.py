@@ -26,7 +26,7 @@ from omegaconf import OmegaConf
 
 import gfnx
 from gfnx.environment.phylogenetic_tree import PhyloTreeEnvironment
-from gfnx.metrics.new import (
+from gfnx.metrics import (
     MultiMetricsModule,
     MultiMetricsState,
     OnPolicyCorrelationMetricsModule,
@@ -285,6 +285,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         train_state.env_params,
     )
     delta_score = train_state.env.reward_module.delta_score(transitions.next_state)
+    # Compute the RL reward / ELBO (for logging purposes)
+    _, log_pb_traj = gfnx.utils.forward_trajectory_log_probs(
+        env, traj_data, env_params
+    )
+    rl_reward = log_pb_traj + log_info["log_gfn_reward"] + log_info["entropy"]
 
     # Step 2. Compute the loss
     def loss_fn(model: TransformerPolicy) -> chex.Array:
@@ -419,7 +424,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             "learning_rate": current_lr,
             "mean_reward": jnp.exp(log_info["log_gfn_reward"]).mean(),
             "mean_log_reward": log_info["log_gfn_reward"].mean(),
-            "rl_reward": log_info["log_gfn_reward"].mean() + log_info["entropy"].mean(),
+            "rl_reward": rl_reward.mean(),
         },
         eval_info,
         train_state.config,

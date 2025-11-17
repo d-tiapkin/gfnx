@@ -21,7 +21,6 @@ from ..base import (
 @chex.dataclass(frozen=True)
 class EnvState(BaseEnvState):
     state: Int[Array, " batch_size dim"]
-    time: Int[Array, " batch_size"]
     is_terminal: Bool[Array, " batch_size"]
     is_initial: Bool[Array, " batch_size"]
     is_pad: Bool[Array, " batch_size"]
@@ -50,7 +49,6 @@ class HypergridEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
     def get_init_state(self, num_envs: int) -> EnvState:
         return EnvState(
             state=jnp.zeros((num_envs, self.dim), dtype=jnp.int32),
-            time=jnp.zeros((num_envs,), dtype=jnp.int32),
             is_terminal=jnp.zeros((num_envs,), dtype=jnp.bool),
             is_initial=jnp.ones((num_envs,), dtype=jnp.bool),
             is_pad=jnp.zeros((num_envs,), dtype=jnp.bool),
@@ -75,14 +73,12 @@ class HypergridEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
 
         all_states_coords = jnp.array(list(product(range(self.side), repeat=self.dim)))
         num_states = all_states_coords.shape[0]
-        time = all_states_coords.sum(axis=1)
-        is_initial = time == 0
+        is_initial = all_states_coords.sum(axis=1) == 0
         is_terminal = jnp.zeros(num_states, dtype=jnp.bool)
         is_pad = jnp.zeros(num_states, dtype=jnp.bool)
 
         return EnvState(
             state=all_states_coords,
-            time=time,
             is_terminal=is_terminal,
             is_initial=is_initial,
             is_pad=is_pad,
@@ -103,18 +99,16 @@ class HypergridEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         env_params: EnvParams,
     ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
         is_terminal = state.is_terminal  # bool
-        time = state.time
 
         def get_state_terminal() -> EnvState:
             return state.replace(is_pad=True)
 
         def get_state_finished() -> EnvState:
-            return state.replace(time=time + 1, is_terminal=True, is_initial=False)
+            return state.replace(is_terminal=True, is_initial=False)
 
         def get_state_inter() -> EnvState:
             return state.replace(
                 state=state.state.at[action].add(1),
-                time=time + 1,
                 is_terminal=False,
                 is_initial=False,
             )
@@ -140,7 +134,6 @@ class HypergridEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         Environment-specific step backward transition. Rewards always zero!
         """
         is_initial = state.is_initial
-        time = state.time
 
         def get_state_initial() -> EnvState:
             return state.replace(is_pad=True)
@@ -149,7 +142,6 @@ class HypergridEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             # First backward step from a terminal state: just undo the stop action
             return EnvState(
                 state=state.state,
-                time=time - 1,
                 is_terminal=False,
                 is_initial=jnp.all(state.state == 0),
                 is_pad=False,
@@ -160,7 +152,6 @@ class HypergridEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             prev_inner_state = state.state.at[backward_action].add(-1)
             return EnvState(
                 state=prev_inner_state,
-                time=time - 1,
                 is_terminal=False,
                 is_initial=jnp.all(prev_inner_state == 0),
                 is_pad=False,
@@ -268,7 +259,6 @@ class HypergridEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             state = jnp.unravel_index(idx, shape=rewards.shape)  # Unpack index to state
             env_state = EnvState(
                 state=jnp.array(state),
-                time=0,
                 is_terminal=True,
                 is_initial=False,
                 is_pad=False,
@@ -366,7 +356,6 @@ class HypergridEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
 
         return EnvState(
             state=sampled_coords,
-            time=sampled_coords.sum(axis=1),
             is_terminal=jnp.ones((batch_size,), dtype=jnp.bool),
             is_initial=jnp.zeros((batch_size,), dtype=jnp.bool),
             is_pad=jnp.zeros((batch_size,), dtype=jnp.bool),

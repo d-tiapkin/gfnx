@@ -47,7 +47,6 @@ class TFBind8Environment(FixedAutoregressiveSequenceEnvironment):
             state = jnp.unravel_index(idx, shape=rewards.shape)  # Unpack index to state
             env_state = EnvState(
                 tokens=jnp.array(state),
-                time=0,
                 is_terminal=True,
                 is_initial=False,
                 is_pad=False,
@@ -144,7 +143,6 @@ class TFBind8Environment(FixedAutoregressiveSequenceEnvironment):
 
         return EnvState(
             tokens=sampled_tokens.astype(jnp.int32),
-            time=jnp.full((batch_size,), self.max_length, dtype=jnp.int32),
             is_terminal=jnp.ones((batch_size,), dtype=jnp.bool_),
             is_initial=jnp.zeros((batch_size,), dtype=jnp.bool_),
             is_pad=jnp.zeros((batch_size,), dtype=jnp.bool_),

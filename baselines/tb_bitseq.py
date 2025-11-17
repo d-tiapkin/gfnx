@@ -28,7 +28,7 @@ from utils.checkpoint import save_checkpoint
 from utils.logger import Writer
 
 import gfnx
-from gfnx.metrics.new import (
+from gfnx.metrics import (
     AccumulatedModesMetricsModule,
     MultiMetricsModule,
     MultiMetricsState,
@@ -162,6 +162,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         env=train_state.env,
         env_params=train_state.env_params,
     )
+    # Compute the RL reward / ELBO (for logging purposes)
+    _, log_pb_traj = gfnx.utils.forward_trajectory_log_probs(
+        env, traj_data, env_params
+    )
+    rl_reward = log_pb_traj + aux_info["log_gfn_reward"] + aux_info["entropy"]
 
     # Step 2. Compute the TB loss
     def loss_fn(
@@ -334,6 +339,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             "entropy": aux_info["entropy"].mean(),
             "grad_norm": optax.tree_utils.tree_l2_norm(grads),
             "logZ": new_logZ,
+            "rl_reward": rl_reward.mean(),
         },
         eval_info,
         train_state.config,

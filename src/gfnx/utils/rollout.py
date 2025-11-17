@@ -177,7 +177,7 @@ def generic_rollout(
     This function should have the following signature:
         `mask_fn(env_state: TEnvState, env_params: TEnvParams) -> Array`
     - sample_action_fn (callable): Function to sample the corresponding action.
-    Signture:
+    Signature:
         `sample_action_fn(rng_key: PRNGKey, policy_probs: Array) -> Action`
 
     Returns:
@@ -279,11 +279,13 @@ def generic_rollout(
     final_env_state = final_traj_stats.env_state
     traj_entropy = jnp.sum(jnp.where(traj_data.pad, 0.0, traj_data.info["entropy"]), axis=1)
     log_gfn_reward = jnp.sum(jnp.where(traj_data.pad, 0.0, traj_data.log_gfn_reward), axis=1)
+    trajectory_length = jnp.sum(jnp.where(traj_data.pad, 0, 1), axis=1)
 
     return traj_data, {
         "entropy": traj_entropy,
         "final_env_state": final_env_state,
         "log_gfn_reward": log_gfn_reward,
+        "trajectory_length": trajectory_length,
     }
 
 
@@ -333,7 +335,7 @@ def split_traj_to_transitions(traj_data: TrajectoryData) -> TransitionData:
     return jax.tree.map(lambda x: x.reshape((-1,) + x.shape[2:]), base_transition_data)
 
 
-def _compute_trajectory_log_ratio(
+def _compute_trajectory_log_probs(
     env: TEnvironment,
     traj_data: TrajectoryData,
     env_params: TEnvParams,
@@ -348,7 +350,7 @@ def _compute_trajectory_log_ratio(
         is_forward: If True, compute forward trajectory ratio; if False, backward
 
     Returns:
-        Log ratio for the trajectory
+        log_pf and log_pb of the trajectory
     """
     batch_size = traj_data.done.shape[0]
 
@@ -400,19 +402,23 @@ def _compute_trajectory_log_ratio(
         backward_logprobs, bwd_actions[..., None], axis=-1
     ).squeeze(-1)
 
-    log_ratio = sampled_forward_logprobs - sampled_backward_logprobs
-    log_ratio_traj = (log_ratio.reshape(batch_size, -1) * (1.0 - traj_data.pad[:, :-1])).sum(
-        axis=-1
+    log_pf_traj = jnp.sum(
+        jnp.where(traj_data.pad[:, :-1], 0.0, sampled_forward_logprobs.reshape(batch_size, -1)),
+        axis=-1,
     )
-    return log_ratio_traj
+    log_pb_traj = jnp.sum(
+        jnp.where(traj_data.pad[:, :-1], 0.0, sampled_backward_logprobs.reshape(batch_size, -1)),
+        axis=-1,
+    )
+    return log_pf_traj, log_pb_traj
 
 
-def forward_trajectory_log_ratio(
+def forward_trajectory_log_probs(
     env: TEnvironment,
     fwd_traj_data: TrajectoryData,
     env_params: TEnvParams,
-) -> Float[Array, " batch_size"]:
-    """Compute the log (PF(tau) / PB(tau)) of the forward trajectory.
+) -> tuple[Float[Array, " batch_size"], Float[Array, " batch_size"]]:
+    """Compute the log PF(tau) and log PB(tau) of the forward trajectory.
 
     Args:
         env (TEnvironment): The environment instance.
@@ -422,17 +428,18 @@ def forward_trajectory_log_ratio(
         env_params (TEnvParams): Parameters for the environment.
 
     Returns:
-        Float[Array, " batch_size"]: Log ratio of the forward trajectory.
+        tuple[Float[Array, " batch_size"], Float[Array, " batch_size"]]:
+        Log PF and PB of the forward trajectory.
     """
-    return _compute_trajectory_log_ratio(env, fwd_traj_data, env_params, is_forward=True)
+    return _compute_trajectory_log_probs(env, fwd_traj_data, env_params, is_forward=True)
 
 
-def backward_trajectory_log_ratio(
+def backward_trajectory_log_probs(
     env: TEnvironment,
     bwd_traj_data: TrajectoryData,
     env_params: TEnvParams,
-) -> Float[Array, " batch_size"]:
-    """Compute the log (PF(tau) / PB(tau)) of the backward trajectory.
+) -> tuple[Float[Array, " batch_size"], Float[Array, " batch_size"]]:
+    """Compute the log PF(tau) and log PB(tau) of the backward trajectory.
 
     Args:
         env (TEnvironment): The environment instance.
@@ -442,6 +449,7 @@ def backward_trajectory_log_ratio(
         env_params (TEnvParams): Parameters for the environment.
 
     Returns:
-        Float[Array, " batch_size"]: Log ratio of the backward trajectory.
+        tuple[Float[Array, " batch_size"], Float[Array, " batch_size"]]:
+        Log PF and PB of the backward trajectory.
     """
-    return _compute_trajectory_log_ratio(env, bwd_traj_data, env_params, is_forward=False)
+    return _compute_trajectory_log_probs(env, bwd_traj_data, env_params, is_forward=False)

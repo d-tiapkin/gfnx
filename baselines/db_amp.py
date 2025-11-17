@@ -28,7 +28,7 @@ from utils.checkpoint import save_checkpoint
 from utils.logger import Writer
 
 import gfnx
-from gfnx.metrics.new import MultiMetricsModule, MultiMetricsState, TopKMetricsModule
+from gfnx.metrics import MultiMetricsModule, MultiMetricsState, TopKMetricsModule
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -157,6 +157,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         transitions.next_state,
         train_state.env_params,
     )
+    # Compute the RL reward / ELBO (for logging purposes)
+    _, log_pb_traj = gfnx.utils.forward_trajectory_log_probs(
+        env, traj_data, env_params
+    )
+    rl_reward = log_pb_traj + log_info["log_gfn_reward"] + log_info["entropy"]
 
     # Step 2. Compute the loss
     def loss_fn(model: TransformerPolicy) -> chex.Array:
@@ -288,7 +293,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             "mean_length": generation_length.mean(),
             "mean_reward": jnp.exp(log_info["log_gfn_reward"]).mean(),
             "mean_log_reward": log_info["log_gfn_reward"].mean(),
-            "rl_reward": log_info["log_gfn_reward"].mean() + log_info["entropy"].mean(),
+            "rl_reward": rl_reward.mean(),
         },
         eval_info,
         train_state.config,

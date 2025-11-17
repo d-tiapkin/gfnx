@@ -28,7 +28,7 @@ from utils.checkpoint import save_checkpoint
 from utils.logger import Writer
 
 import gfnx
-from gfnx.metrics.new import (
+from gfnx.metrics import (
     AccumulatedModesMetricsModule,
     MultiMetricsModule,
     MultiMetricsState,
@@ -174,6 +174,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         transitions.next_state,
         train_state.env_params,
     )
+    # Compute the RL reward / ELBO (for logging purposes)
+    _, log_pb_traj = gfnx.utils.forward_trajectory_log_probs(
+        env, traj_data, env_params
+    )
+    rl_reward = log_pb_traj + log_info["log_gfn_reward"] + log_info["entropy"]
 
     # Step 2. Compute the loss
     def loss_fn(model: TransformerPolicy) -> chex.Array:
@@ -293,7 +298,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             "grad_norm": optax.tree_utils.tree_l2_norm(grads),
             "mean_reward": jnp.exp(log_info["log_gfn_reward"]).mean(),
             "mean_log_reward": log_info["log_gfn_reward"].mean(),
-            "rl_reward": log_info["log_gfn_reward"].mean() + log_info["entropy"].mean(),
+            "rl_reward": rl_reward.mean(),
         },
         eval_info,
         train_state.config,
@@ -393,15 +398,11 @@ def run_experiment(cfg: OmegaConf) -> None:
     )
     vector_tokenize = jax.vmap(lambda x: gfnx.utils.bitseq.tokenize(x, env.k))
     test_set_tokens = vector_tokenize(binary_test_set)
-    test_set_states = gfnx.BitseqEnvState.from_tokens(test_set_tokens).replace(
-        time=jnp.ones(test_set_tokens.shape[0], dtype=jnp.int32) * env.max_length
-    )
+    test_set_states = gfnx.BitseqEnvState.from_tokens(test_set_tokens)
     # Initialize the metrics
     mode_set = env_params.reward_params["mode_set"]
     mode_set_tokens = vector_tokenize(mode_set)
-    modes_states = gfnx.BitseqEnvState.from_tokens(mode_set_tokens).replace(
-        time=jnp.ones(mode_set_tokens.shape[0], dtype=jnp.int32) * env.max_length
-    )
+    modes_states = gfnx.BitseqEnvState.from_tokens(mode_set_tokens)
 
     # Here we need to pass the initial parameters for all  metrics
     metrics_state = metrics_module.init(

@@ -72,4 +72,4 @@ class UniformDAGPrior(BaseDAGPrior):
         next_state: DAGEnvState,
         env_params: DAGEnvParams,
     ) -> TLogReward:
-        return jnp.zeros(state.time.shape[0])  # [B]
+        return jnp.zeros(state.is_pad.shape[0])  # [B]

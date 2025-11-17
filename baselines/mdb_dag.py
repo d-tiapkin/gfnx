@@ -28,7 +28,7 @@ from utils.checkpoint import save_checkpoint
 from utils.logger import Writer
 
 import gfnx
-from gfnx.metrics.new import (
+from gfnx.metrics import (
     ApproxDistributionMetricsModule,
     MultiMetricsModule,
     MultiMetricsState,
@@ -341,6 +341,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         transitions.next_state,
         train_state.env_params,
     )
+    # Compute the RL reward / ELBO (for logging purposes)
+    _, log_pb_traj = gfnx.utils.forward_trajectory_log_probs(
+        env, traj_data, env_params
+    )
+    rl_reward = log_pb_traj + log_info["log_gfn_reward"] + log_info["entropy"]
 
     # Step 2. Compute the loss
     def loss_fn(model: GNNPolicy) -> chex.Array:
@@ -480,7 +485,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             "grad_norm": optax.tree_utils.tree_norm(grads, ord=2),
             "mean_reward": jnp.exp(log_info["log_gfn_reward"]).mean(),
             "mean_log_reward": log_info["log_gfn_reward"].mean(),
-            "rl_reward": log_info["log_gfn_reward"].mean() + log_info["entropy"].mean(),
+            "rl_reward": rl_reward.mean(),
         },
         metrics_state,
         train_state.config,
@@ -638,7 +643,6 @@ def run_experiment(cfg: OmegaConf) -> None:
     test_set_states = gfnx.DAGEnvState(
         adjacency_matrix=test_set_adjacency_matrix,
         closure_T=test_set_closure_T,
-        time=jnp.zeros(num_graphs, dtype=jnp.int32),  # dummy
         is_terminal=jnp.ones(num_graphs, dtype=jnp.bool),
         is_initial=jnp.zeros(num_graphs, dtype=jnp.bool),
         is_pad=jnp.zeros(num_graphs, dtype=jnp.bool),

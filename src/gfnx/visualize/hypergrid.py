@@ -203,7 +203,6 @@ class HypergridRenderer(BaseRenderer[EnvState]):
 
         dummy_state = EnvState(
             state=state_array,
-            time=jnp.zeros((total_states,)),
             is_terminal=jnp.ones((total_states,), dtype=jnp.bool),
             is_initial=jnp.zeros((total_states,), dtype=jnp.bool),
             is_pad=jnp.zeros((total_states,), dtype=jnp.bool),
