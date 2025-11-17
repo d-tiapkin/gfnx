@@ -5,9 +5,9 @@ trajectories that start from ground-truth terminal states. It complements other 
 
 $$
 \begin{aligned}
-\operatorname{EUBO} &= \operatorname{\overline{EUBO}} - \log Z \geq 0
+\mathrm{EUBO} &= \mathrm{\overline{EUBO}} - \log Z \geq 0
 \\
-\operatorname{\overline{EUBO}} &\mathbb{E}_{\tau \sim \frac{R}{Z} \cdot P_B} \Bigg[ \log R(s_T) + \sum_{t=1}^T \log P_B(s_{t-1} \mid s_t) - \sum_{t=1}^T \log P_F(s_t \mid s_{t-1}) \Bigg] &\geq \log Z
+\mathrm{\overline{EUBO}} &= \mathbb{E}_{\tau \sim \frac{R}{Z} \cdot P_B} \Bigg[ \log R(s_T) + \sum_{t=1}^T \log P_B(s_{t-1} \mid s_t) - \sum_{t=1}^T \log P_F(s_t \mid s_{t-1}) \Bigg] \geq \log Z
 \end{aligned}
 $$
 
@@ -18,7 +18,7 @@ $$
 - Treat this metric as a measure of a global mode coverage, and use it with $\text{ELBO}$ or distribution-based metrics.
 - The test set of terminal states is sampled from a true distribution and fixed, hence, the metric is comparable throughout training.
 - If $\log Z$ (a true normalising constant) is accessible, the metric is normalised and $\text{EUBO}$ is reported. In this case, the perfect value is 0.
-- If $\log Z$ is unknown for environment, the metric is unnormalised and $\operatorname{\overline{EUBO}}$ is reported. In this case, the perfect value is $\log Z$.
+- If $\log Z$ is unknown for environment, the metric is unnormalised and $\mathrm{\overline{EUBO}}$ is reported. In this case, the perfect value is $\log Z$.
 
 ## Key parameters
 

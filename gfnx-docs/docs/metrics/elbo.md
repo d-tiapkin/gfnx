@@ -6,10 +6,10 @@ forward policy aligns with the backward distribution. Formally, it is defined as
 
 $$
 \begin{aligned}
-\operatorname{ELBO} &= \operatorname{\overline{ELBO}} - \log Z \leq 0
+\mathrm{ELBO} &= \overline{\mathrm{ELBO}} - \log Z \leq 0
 \\
-\operatorname{\overline{ELBO}} &= 
-\mathbb{E}_{\tau \sim P_F} \Bigg[ \log R(s_T) + \sum_{t=1}^T \log P_B(s_{t-1} \mid s_t) - \sum_{t=1}^T \log P_F(s_t \mid s_{t-1}) \Bigg] \leq \\ &\leq \log Z
+\mathrm{\overline{ELBO}} &= 
+\mathbb{E}_{\tau \sim P_F} \Bigg[ \log R(s_T) + \sum_{t=1}^T \log P_B(s_{t-1} \mid s_t) - \sum_{t=1}^T \log P_F(s_t \mid s_{t-1}) \Bigg] \leq \log Z
 \end{aligned}
 $$
 
@@ -20,7 +20,7 @@ $$
 - Treat this metric as a measure of within-mode quality rather than global coverage, and use with $\text{EUBO}$ or correlation metrics.
 - Increase `n_rounds` if the estimate is too noisy. Each round performs a new set of forward rollouts;
 - If  $\log Z$ (a true log-normalising constant) is accessible, $\text{ELBO}$ is reported. In this case, the perfect value is 0.
-- If  $\log Z$ is unknown for environment, the metric is unnormalised and $\operatorname{\overline{ELBO}}$ is reported. In this case, the perfect value is $\log Z$.
+- If  $\log Z$ is unknown for environment, the metric is unnormalised and $\mathrm{\overline{ELBO}}$ is reported. In this case, the perfect value is $\log Z$.
 
 ## Key parameters
 
