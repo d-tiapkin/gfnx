@@ -37,6 +37,8 @@ logging:
   eval_each: 500
   tqdm_print_rate: 20
   use_writer: false
+  log_dir: null # If null, dir will be automatically created
+  checkpoint_dir: null # If null, dir will be automatically created
 
 # Technical information for writer
 writer:

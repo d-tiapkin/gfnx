@@ -38,6 +38,8 @@ logging:
   eval_each: 500 # in terms of total training steps, not divited by num_envs
   tqdm_print_rate: 20
   use_writer: false
+  log_dir: null # If null, dir will be automatically created
+  checkpoint_dir: null # If null, dir will be automatically created
 
 # Technical information for writer
 writer:

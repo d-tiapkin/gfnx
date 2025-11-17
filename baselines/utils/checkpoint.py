@@ -1,3 +1,4 @@
+import os
 from typing import Any
 
 import equinox as eqx
@@ -15,8 +16,8 @@ def save_checkpoint(path: str, state: Any):
     ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
     params = eqx.filter(state, eqx.is_array)
     ckptr.save(
-        path,
-        args=ocp.args.StandardSave(params),
+        os.path.abspath(path),  # Checkpoint path should be absolute.
+        args=ocp.args.StandardSave(params)
     )
     ckptr.wait_until_finished()
 
@@ -38,7 +39,10 @@ def load_checkpoint(path: str, state: Any) -> Any:
 
     ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
     state_params, state_static = eqx.partition(state, eqx.is_array)
-    loaded_params = ckptr.restore(path, state_params)
+    loaded_params = ckptr.restore(
+        os.path.abspath(path),  # Checkpoint path should be absolute.
+        state_params
+    )
     loaded_state = eqx.combine(loaded_params, state_static)
 
     return loaded_state

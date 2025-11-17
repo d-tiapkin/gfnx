@@ -360,7 +360,7 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     if cfg.logging.use_writer:
         log.info("Initialize writer")
-        log_dir = os.path.join(
+        log_dir = cfg.logging.log_dir if cfg.logging.log_dir else os.path.join(
             hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
         )
         writer.init(
@@ -385,7 +385,7 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     # Save the final model
     train_state = eqx.combine(train_state_params, train_state_static)
-    dir = os.path.join(
+    dir = cfg.logging.checkpoint_dir if cfg.logging.checkpoint_dir else os.path.join(
         hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
         f"checkpoints_{os.getpid()}/",
     )

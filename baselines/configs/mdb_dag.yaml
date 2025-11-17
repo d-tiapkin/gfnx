@@ -38,6 +38,8 @@ logging:
   track_each: 1000
   tqdm_print_rate: 100
   use_writer: true
+  log_dir: null # If null, dir will be automatically created
+  checkpoint_dir: null # If null, dir will be automatically created
 
 # Technical information for writer
 writer:

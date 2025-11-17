@@ -27,6 +27,8 @@ logging:
   metric_buffer_size: 200000
   tqdm_print_rate: 20
   use_writer: true
+  log_dir: null # If null, dir will be automatically created
+  checkpoint_dir: null # If null, dir will be automatically created
 
 # Technical information for writer
 writer:
