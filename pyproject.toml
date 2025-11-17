@@ -16,7 +16,8 @@ dependencies = [
   "flashbax",
   "levenshtein",
   "numpy==1.26.4",
-  "jaxtyping"
+  "jaxtyping",
+  "networkx"
 ]
 authors = [
   { name="Daniil Tiapkin", email="daniil.tiapkin@polytechnique.edu" },
