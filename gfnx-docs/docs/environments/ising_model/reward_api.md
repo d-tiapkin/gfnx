@@ -1,3 +1,3 @@
 # Reward API Reference
  
-Work in progress...
+::: gfnx.reward.ising

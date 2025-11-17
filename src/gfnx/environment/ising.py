@@ -74,6 +74,9 @@ class IsingEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         action: TAction,
         env_params: EnvParams,
     ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+        """
+        Environment-specific step forward transition.
+        """
         is_terminal = state.is_terminal
         time = state.time
 
@@ -125,6 +128,7 @@ class IsingEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         return prev_state, prev_state.is_initial, {}
 
     def get_obs(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        """Returns the lattice partial assignment of spins."""
         return state.state
 
     def get_backward_action(
@@ -134,6 +138,7 @@ class IsingEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         next_state: EnvState,
         params: EnvParams,
     ) -> chex.Array:
+        """Returns backward action given the forward transition."""
         return jnp.mod(forward_action, self.dim)
 
     def get_forward_action(
@@ -143,6 +148,7 @@ class IsingEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         prev_state: EnvState,
         env_params: EnvParams,
     ) -> chex.Array:
+        """Returns forward action given the backward transition."""
         batch_size = state.state.shape[0]
         return backward_action + self.dim * state.state[jnp.arange(batch_size), backward_action]
 
