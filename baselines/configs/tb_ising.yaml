@@ -1,0 +1,60 @@
+seed: 1
+env_seed: 2
+
+num_train_steps: 20_000
+num_envs: 256
+
+agent:
+  learning_rate: 1e-2
+  logZ_learning_rate: 1e-3
+  ebm_learning_rate: 1e-4
+  ebm_l1_reg: 1e-1
+  train_backward: True
+
+network:
+  # Input size and output size are computed based on the environment
+  hidden_size: 256
+  depth: 4
+
+environment:
+  N: 10  # lattice side
+  sigma: 0.1
+  alpha: 1.0
+
+data:
+  num_samples: 2000
+  # Example of using PT sampler
+  sampler: "pt"
+  sampler_kwargs:
+    burn_in: 1000
+    num_replicas: 16
+    sweeps_per_exchange: 2
+    exchanges_per_sample: 16
+    alpha_min_fraction: 0.4
+  # Example of using Wolff sampler
+  # sampler: "wolff"
+  # sampler_kwargs:
+  #   burn_in: 1000
+  #   sweeps_per_sample: 500
+
+logging:
+  track_each: 200
+  eval_each: 200
+  tqdm_print_rate: 200
+  use_writer: true
+  log_dir: null # If null, dir will be automatically created
+  checkpoint_dir: null # If null, dir will be automatically created
+
+# Technical information for writer
+writer:
+  writer_type: null # wandb, trackio or null (no logging online)
+  save_locally: true # Save metrics locally or not
+  entity: null
+  project: tb-ising
+
+# Technical information for hydra
+hydra:
+  run:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}

@@ -33,15 +33,18 @@ from .environment import (
     HypergridEnvironment,
     HypergridEnvParams,
     HypergridEnvState,
+    IsingEnvironment,
+    IsingEnvParams,
+    IsingEnvState,
     PhyloTreeEnvironment,
     PhyloTreeEnvParams,
     PhyloTreeEnvState,
+    QM9SmallEnvironment,
+    QM9SmallEnvParams,
+    QM9SmallEnvState,
     TFBind8Environment,
     TFBind8EnvParams,
     TFBind8EnvState,
-    QM9SmallEnvironment,
-    QM9SmallEnvParams,
-    QM9SmallEnvState
 )
 from .reward import (
     BitseqRewardModule,
@@ -51,9 +54,10 @@ from .reward import (
     EqxProxyGFPRewardModule,
     GeneralHypergridRewardModule,
     HardHypergridRewardModule,
+    IsingRewardModule,
     PhyloTreeRewardModule,
-    TFBind8RewardModule,
     QM9SmallRewardModule,
+    TFBind8RewardModule,
 )
 from .visualize import Visualizer
 
@@ -93,6 +97,14 @@ __all__ = [
     "QM9SmallEnvParams",
     "QM9SmallEnvState",
     "QM9SmallRewardModule",
+    "DAGEnvironment",
+    "DAGEnvState",
+    "DAGEnvParams",
+    "DAGRewardModule",
+    "IsingEnvironment",
+    "IsingEnvState",
+    "IsingEnvParams",
+    "IsingRewardModule",
     "TBackwardAction",
     "TDone",
     "TEnvParams",

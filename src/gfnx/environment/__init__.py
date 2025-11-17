@@ -13,32 +13,38 @@ from .gfp import GFPEnvironment
 from .hypergrid import EnvParams as HypergridEnvParams
 from .hypergrid import EnvState as HypergridEnvState
 from .hypergrid import HypergridEnvironment
+from .ising import EnvParams as IsingEnvParams
+from .ising import EnvState as IsingEnvState
+from .ising import IsingEnvironment
 from .phylogenetic_tree import EnvParams as PhyloTreeEnvParams
 from .phylogenetic_tree import EnvState as PhyloTreeEnvState
 from .phylogenetic_tree import PhyloTreeEnvironment
-from .tfbind import EnvParams as TFBind8EnvParams
-from .tfbind import EnvState as TFBind8EnvState
-from .tfbind import TFBind8Environment
 from .qm9_small import EnvParams as QM9SmallEnvParams
 from .qm9_small import EnvState as QM9SmallEnvState
 from .qm9_small import QM9SmallEnvironment
+from .tfbind import EnvParams as TFBind8EnvParams
+from .tfbind import EnvState as TFBind8EnvState
+from .tfbind import TFBind8Environment
 
 __all__ = [
     "AMPEnvironment",
     "AMPEnvState",
     "AMPEnvParams",
-    "GFPEnvironment",
-    "GFPEnvState",
-    "GFPEnvParams",
     "BitseqEnvironment",
     "BitseqEnvState",
     "BitseqEnvParams",
-    "HypergridEnvironment",
-    "HypergridEnvState",
-    "HypergridEnvParams",
     "DAGEnvironment",
     "DAGEnvState",
     "DAGEnvParams",
+    "GFPEnvironment",
+    "GFPEnvState",
+    "GFPEnvParams",
+    "HypergridEnvironment",
+    "HypergridEnvState",
+    "HypergridEnvParams",
+    "IsingEnvironment",
+    "IsingEnvState",
+    "IsingEnvParams",
     "PhyloTreeEnvironment",
     "PhyloTreeEnvState",
     "PhyloTreeEnvParams",

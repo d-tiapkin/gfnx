@@ -6,6 +6,9 @@ from .exploration import (
     apply_epsilon_greedy_vmap,
     create_exploration_schedule,
 )
+from .ising import get_true_ising_J
+from .ising_hbpt_sample import pt_sampler
+from .ising_wolf_sample import wolff_sampler
 from .masking import mask_logits
 from .molecules import (
     QM9_SMALL_BLOCKS,
@@ -55,4 +58,7 @@ __all__ = [
     "total_variation_distance",
     "QM9_SMALL_BLOCKS",
     "QM9_SMALL_FULL_ALPHABET",
+    "wolff_sampler",
+    "pt_sampler",
+    "get_true_ising_J",
 ]

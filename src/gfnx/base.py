@@ -269,7 +269,7 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         policy_logprobs: chex.Array,
     ) -> Int[Array, " batch_size"]:
         """
-        Helping function for sampling actions from policy.
+        Helping function for sampling backward actions from policy.
         """
         batch_size = policy_logprobs.shape[0]
         action = jax.random.categorical(rng_key, policy_logprobs, axis=-1)
