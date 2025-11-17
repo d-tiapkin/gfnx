@@ -4,10 +4,11 @@ from .sequence import (
     EnvParams,  # noqa: F401
     EnvState,  # noqa: F401
     NonAutoregressiveSequenceEnvironment,
+    FixedAutoregressiveSequenceEnvironment,
 )
 
 
-class TFBind8Environment(NonAutoregressiveSequenceEnvironment):
+class TFBind8Environment(FixedAutoregressiveSequenceEnvironment):
     def __init__(self, reward_module: TRewardModule) -> None:
         self.char_to_id = {
             char: i for i, char in enumerate(NUCLEOTIDES_FULL_ALPHABET)

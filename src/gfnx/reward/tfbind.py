@@ -4,6 +4,7 @@ pip install git+https://github.com/brandontrabucco/design-bench.git@chris/fixes-
 """
 
 import itertools
+import pickle
 
 import chex
 import jax.numpy as jnp
@@ -23,8 +24,9 @@ class TFBind8RewardModule(
         self,
         nchar: int = 4,
         max_length: int = 8,
-        min_reward: float = 1e-8,
-        reward_exponent: float = 3.0
+        min_reward: float = 1e-3,
+        reward_exponent: float = 3.0,
+        reward_scale: float = 10.0,
     ):
         """
         TODO: Add description
@@ -33,24 +35,29 @@ class TFBind8RewardModule(
         self.max_length = max_length
         self.min_reward = min_reward
         self.reward_exponent = reward_exponent
+        self.reward_scale = reward_scale
 
     def init(
         self, rng_key: chex.PRNGKey, dummy_state: TFBind8EnvState
     ) -> None:
         # Make a full loop to get the values for all possible states
-        import design_bench
-
-        task = design_bench.make("TFBind8-Exact-v0")
+        
         # Generate all possible values of characters
         values = list(range(self.nchar))
         # Generate all possible arrays
         all_states = np.array(
             list(itertools.product(values, repeat=self.max_length))
         )
-        values = jnp.clip(
-            jnp.pow(task.predict(all_states), self.reward_exponent), 
-            min=self.min_reward
-        )
+
+        with open('proxy/weights/tfbind/tfbind8-exact-v0-all.pkl', 'rb') as f:
+            oracle_d = pickle.load(f)
+        oracle = {tuple(x): float(y[0]) for x, y in zip(oracle_d['x'], oracle_d['y'])}
+
+        values_raw = jnp.array([oracle[tuple(state)] for state in all_states])
+        
+        values = jnp.pow(values_raw, self.reward_exponent)
+        values = (values * self.reward_scale / values.max())
+        values = jnp.clip(values, min=self.min_reward)
         return {"rewards": values}  # Dict with all possible values
 
     def reward(
@@ -64,11 +71,11 @@ class TFBind8RewardModule(
         indices = jnp.sum(tokens * powers_array, axis=-1)
         return jnp.take_along_axis(
             env_params.reward_params["rewards"],
-            jnp.expand_dims(indices, axis=-1),
+            indices,
             axis=0,
             mode="fill",
             fill_value=self.min_reward,
-        ).squeeze(-1)
+        )
 
     def log_reward(
         self, state: TFBind8EnvState, env_params: TFBind8EnvParams

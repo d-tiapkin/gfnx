@@ -221,8 +221,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         (idx % train_state.config.logging.track_each == 0)
         | (idx + 1 == train_state.config.num_train_steps),
         train_state.metrics_module.get,
-        lambda _: {"tv": -1.0, "kl": -1.0},
+        lambda a, b: {"tv": -1.0, "kl": -1.0, "reward_delta": -1.0},
         metric_state,
+        env_params
     )
 
     # Perform the logging via JAX debug callback
