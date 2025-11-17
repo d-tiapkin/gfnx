@@ -170,8 +170,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         # Compute the forward log-probs
         fwd_logits = policy_outputs["forward_logits"]
         invalid_mask = env.get_invalid_mask(transitions.state, env_params)
-        masked_fwd_logits = gfnx.utils.mask_logits(fwd_logits, invalid_mask)
-        fwd_all_log_probs = jax.nn.log_softmax(masked_fwd_logits, axis=-1)
+        fwd_all_log_probs = jax.nn.log_softmax(
+            fwd_logits, where=jnp.logical_not(invalid_mask), axis=-1
+        )
         fwd_logprobs = jnp.take_along_axis(
             fwd_all_log_probs,
             jnp.expand_dims(transitions.action, axis=-1),
@@ -183,8 +184,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         next_policy_outputs = jax.vmap(model, in_axes=(0,))(transitions.next_obs)
         bwd_logits = next_policy_outputs["backward_logits"]
         next_bwd_invalid_mask = env.get_invalid_backward_mask(transitions.next_state, env_params)
-        masked_bwd_logits = gfnx.utils.mask_logits(bwd_logits, next_bwd_invalid_mask)
-        bwd_all_log_probs = jax.nn.log_softmax(masked_bwd_logits, axis=-1)
+        bwd_all_log_probs = jax.nn.log_softmax(
+            bwd_logits, where=jnp.logical_not(next_bwd_invalid_mask), axis=-1
+        )
         bwd_logprobs = jnp.take_along_axis(
             bwd_all_log_probs, jnp.expand_dims(bwd_actions, axis=-1), axis=-1
         ).squeeze(-1)

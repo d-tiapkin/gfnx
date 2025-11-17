@@ -1,6 +1,6 @@
-# GFNX
+# gfnx: Generative Flow Networks in jaX
 
-`gfnx` is a JAX-native toolkit for building and studying Generative Flow Networks (GFlowNets). It brings together high-performance training loops, a collection of benchmark environments, and reproducible baselines so you can iterate quickly on new ideas.
+`gfnx` is a JAX-native toolkit for building and studying Generative Flow Networks (GFlowNets). It brings together a collection of benchmark environments and reproducible baselines so you can iterate quickly on new ideas.
 
 ## Highlights
 
@@ -35,7 +35,7 @@ cd gfnx
 pip install -e .[baselines]
 ```
 
-The editable install keeps your local changes in sync with the Python package, while the optional `baselines` extra pulls in the dependencies required by the reference training scripts.
+The editable install keeps your local changes in sync with the Python package, while the optional `baselines` extra pulls in the dependencies required by the reference training scripts. As in with `CleanRL` ideology, the baselines are not supposed to be imported, they serve only as a reference implementation.
 
 ## Quickstart
 
@@ -52,6 +52,7 @@ For more context on the available environments, metrics, and baselines, continue
 - [Environments](environments/index.md)
 - [Metrics](metrics.md)
 - [Baselines](baselines.md)
+- [Walkthrough](walkthrough.md)
 
 ## Support
 

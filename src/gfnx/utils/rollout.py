@@ -51,29 +51,24 @@ def forward_rollout(
     env: TEnvironment,
     env_params: TEnvParams,
 ) -> tuple[TrajectoryData, dict]:
-    """Forward rollout in the environment.
+    """Run a batch of forward rollouts.
 
     Args:
-    - rng_key (chex.PRNGKey): Random number generator key.
-    - num_envs (int): Number of parallel environment to perform a rollout.
-    - policy_fn (TPolicyFn): Policy function to determine actions.
-    This function should have the following signature:
-        `
-        policy_fn(
-            rng_key: chex.PRNGKey, env_obs: TObs, policy_params: TPolicyParams
-        ) -> tuple[chex.Array, dict]
-        `
-        and should return the action logits (not nessesarily masked) as the
-        first output and info (forward and backward logits as 'fwd_logits'
-        and 'bwd_logits', and additional) as the second one.
-    - policy_params (TPolicyParams): Parameters for the policy function.
-    - env (TEnvironment): The environment to interact with.
-    - env_params (TEnvParams): Parameters for the environment.
+        rng_key: Random key passed to the policy and environment.
+        num_envs: Number of parallel environments (batch size).
+        policy_fn: Callable with signature
+            `policy_fn(rng_key, env_obs, policy_params) -> tuple[chex.Array, dict]`.
+            The first output contains (unmasked) action logits, while the info dict
+            may include forward/backward logits under the keys `fwd_logits` and
+            `bwd_logits`.
+        policy_params: Parameters consumed by `policy_fn`.
+        env: Environment instance exposing `reset`, `step`, `get_invalid_mask`,
+            and `sample_action`.
+        env_params: Environment parameters (typically static).
 
     Returns:
-        tuple[TrajectoryData, dict]: A tuple containing the trajectory data and
-        additional information, such as trajectory-wise entropy and final
-        states.
+        A `(TrajectoryData, info)` tuple containing the padded trajectories and
+        auxiliary rollout statistics such as per-trajectory entropy.
     """
     init_obs, init_state = env.reset(num_envs, env_params)
     return generic_rollout(
@@ -98,27 +93,21 @@ def backward_rollout(
     env: TEnvironment,
     env_params: TEnvParams,
 ) -> tuple[TrajectoryData, dict]:
-    """Forward rollout in the environment.
+    """Run a batch of backward rollouts starting from terminal states.
 
     Args:
-    - rng_key (chex.PRNGKey): Random number generator key.
-    - init_state (TEnvState): Initial state of the environment.
-    - policy_fn (TPolicyFn): Policy function to determine actions.
-    This function should have the following signature:
-        `
-        policy_fn(
-            rng_key: chex.PRNGKey, env_obs: TObs, policy_params: TPolicyParams
-        ) -> chex.Array
-        `
-        and should return the action logits (not nessesarily masked).
-    - policy_params (TPolicyParams): Parameters for the policy function.
-    - env (TEnvironment): The environment to interact with.
-    - env_params (TEnvParams): Parameters for the environment.
+        rng_key: Random key passed to the policy and environment.
+        init_state: Batched terminal (or intermediate) states to start from.
+        policy_fn: Callable with signature
+            `policy_fn(rng_key, env_obs, policy_params) -> chex.Array` returning
+            action logits for backward moves.
+        policy_params: Parameters consumed by `policy_fn`.
+        env: Environment instance exposing `get_obs`, `backward_step`,
+            `get_invalid_backward_mask`, and `sample_backward_action`.
+        env_params: Environment parameters (typically static).
 
     Returns:
-        tuple[TrajectoryData, dict]: A tuple containing the trajectory data and
-        additional information, such as trajectory-wise entropy and final
-        states.
+        A `(TrajectoryData, info)` tuple mirroring the forward rollout contract.
     """
     init_obs = env.get_obs(init_state, env_params)
     return generic_rollout(
@@ -147,43 +136,26 @@ def generic_rollout(
     mask_fn: callable,
     sample_action_fn: callable,
 ) -> tuple[TrajectoryData, dict]:
-    """Generic function for rollouts in the environment.
+    """Common rollout implementation shared by forward/backward helpers.
 
     Args:
-    - rng_key (chex.PRNGKey): Random number generator key.
-    - init_obs (TObs): Initial observation from the environment.
-    - init_state (TEnvState): Initial state of the environment.
-    - policy_fn (TPolicyFn): Policy function to determine actions.
-    This function should have the following signature:
-        `
-        policy_fn(
-            rng_key: chex.PRNGKey, env_obs: TObs, policy_params: TPolicyParams
-        ) -> tuple[chex.Array, dict]
-        `
-        and should return the action logits (not nessesarily masked) as the
-        first output and info (forward and backward logits as 'fwd_logits'
-        and 'bwd_logits', and additional) as the second one.
-    - policy_params (TPolicyParams): Parameters for the policy function.
-    - env (TEnvironment): The environment to interact with.
-    - env_params (TEnvParams): Parameters for the environment.
-    - step_fn (callable): Function to perform a step in the environment.
-    This function should have the following signature:
-        `step_fn(
-            env_state: TEnvState,
-            action: TAction | TBackwardAction,
-            env_params: TEnvParams,
-    ) -> Tuple[TObs, TEnvState, TLogReward, TDone, Dict[Any, Any]]`
-    - mask_fn (callable): Function to compute masks for invalid actions.
-    This function should have the following signature:
-        `mask_fn(env_state: TEnvState, env_params: TEnvParams) -> Array`
-    - sample_action_fn (callable): Function to sample the corresponding action.
-    Signature:
-        `sample_action_fn(rng_key: PRNGKey, policy_probs: Array) -> Action`
+        rng_key: Random key passed to the policy and environment.
+        init_obs: Batched observations at which to start the rollout.
+        init_state: Batched environment states matching `init_obs`.
+        policy_fn: Callable returning logits (and optionally metadata) given
+            `(rng_key, env_obs, policy_params)`.
+        policy_params: Parameters consumed by `policy_fn`.
+        env: Environment instance used for auxiliary methods such as sampling.
+        env_params: Environment parameters (typically static).
+        step_fn: Function with signature
+            `step_fn(env_state, action, env_params) -> tuple[TObs, TEnvState, Float, Bool, dict]`.
+        mask_fn: Function producing invalid-action masks for the current state.
+        sample_action_fn: Function that samples an action given RNG and policy
+            probabilities.
 
     Returns:
-        tuple[TrajectoryData, dict]: A tuple containing the trajectory data and
-        additional information, such as trajectory-wise entropy and final
-        states.
+        A `(TrajectoryData, info)` tuple containing padded trajectories and
+        rollout-level statistics (e.g., entropies, final observations).
     """
     num_envs = jax.tree.leaves(init_state)[0].shape[0]  # Get the batch size
 
