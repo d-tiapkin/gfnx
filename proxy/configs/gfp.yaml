@@ -1,0 +1,32 @@
+# Follows https://arxiv.org/pdf/2209.12782#page=14.21
+dataset:
+  _target_: proxy.datasets.gfp.GFPRewardProxyDataset
+
+network:
+  _target_: proxy.model.transformer.TransformerRewardModel # TODO:FIXME
+  encoder_config:
+    max_len: 237
+    num_heads: 8
+    num_layers: 4
+
+    mlp_dim: 64
+    qkv_dim: 64
+    emb_dim: 64
+
+    dropout_rate: 0.0
+    vocab_size: 26
+
+  output_hid: 512
+  output_dims: 1
+
+training:
+  batch_size: 256
+  learning_rate: 1e-4
+  weight_decay: 1e-6
+  num_epochs: 1000    # Very large number, but we will use early stopping
+  val_each_epoch: 2   # In the BioGFN code, they do validation each 100 batches, in our case one epoch is 175 batches
+  early_stop_tol: 5
+  task: 'regression'
+
+seed: 1
+save_path: /home/labcmap/daniil.tiapkin/gfnx/proxy/weights/gfp/
