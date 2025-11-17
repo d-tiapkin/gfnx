@@ -2,7 +2,13 @@ from typing import Tuple
 
 import chex
 
+from gfnx.utils import PROTEINS_FULL_ALPHABET
+
+
 class RewardProxyDataset:
+    """Base class for reward proxy datasets for protein design tasks."""
+    char_to_id = {char: i for i, char in enumerate(PROTEINS_FULL_ALPHABET)}
+
     def train_set(self) -> Tuple[chex.Array, chex.Array]:
         raise NotImplementedError
 
@@ -12,3 +18,7 @@ class RewardProxyDataset:
     @property
     def max_len(self) -> int:
         raise NotImplementedError
+
+    @property
+    def offset(self) -> float:
+        return 0.0

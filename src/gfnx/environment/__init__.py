@@ -10,9 +10,6 @@ from .gfp import GFPEnvironment
 from .hypergrid import EnvParams as HypergridEnvParams
 from .hypergrid import EnvState as HypergridEnvState
 from .hypergrid import HypergridEnvironment
-from .phylogenetic_tree import EnvParams as PhyloTreeEnvParams
-from .phylogenetic_tree import EnvState as PhyloTreeEnvState
-from .phylogenetic_tree import PhyloTreeEnvironment
 
 __all__ = [
     "AMPEnvironment",
@@ -27,7 +24,4 @@ __all__ = [
     "HypergridEnvironment",
     "HypergridEnvState",
     "HypergridEnvParams",
-    "PhyloTreeEnvironment",
-    "PhyloTreeEnvState",
-    "PhyloTreeEnvParams",
 ]

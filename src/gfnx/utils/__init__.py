@@ -5,13 +5,6 @@ from .bitseq import (
     mode_set_distance,
     tokenize,
 )
-from .corr import spearmanr
-from .exploration import (
-    ExplorationState,
-    apply_epsilon_greedy,
-    apply_epsilon_greedy_vmap,
-    create_exploration_schedule,
-)
 from .masking import mask_logits
 from .proteins import (
     AMINO_ACIDS,
@@ -25,17 +18,15 @@ from .rollout import (
     forward_rollout,
     split_traj_to_transitions,
 )
+from .corr import spearmanr
 
 __all__ = [
     "AMINO_ACIDS",
     "PROTEINS_FULL_ALPHABET",
     "PROTEINS_SPECIAL_TOKENS",
-    "apply_epsilon_greedy",
-    "apply_epsilon_greedy_vmap",
     "backward_rollout",
     "construct_binary_test_set",
     "construct_mode_set",
-    "create_exploration_schedule",
     "detokenize",
     "forward_rollout",
     "mask_logits",
@@ -45,5 +36,4 @@ __all__ = [
     "tokenize",
     "TrajectoryData",
     "TransitionData",
-    "ExplorationState",
 ]

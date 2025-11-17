@@ -13,6 +13,7 @@ dependencies = [
   "jax>=0.4.27.0",
   "jaxlib>=0.4.27.0",
   "chex",
+  "flashbax",
   "levenshtein",
   "numpy==1.26.4",
   "jaxtyping"

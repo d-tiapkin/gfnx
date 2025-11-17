@@ -1,4 +1,9 @@
-from . import metrics, networks, spaces, utils
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from . import networks
+
+from . import metrics, spaces, utils
 from .base import (
     TAction,
     TBackwardAction,
@@ -25,18 +30,14 @@ from .environment import (
     HypergridEnvironment,
     HypergridEnvParams,
     HypergridEnvState,
-    PhyloTreeEnvironment,
-    PhyloTreeEnvParams,
-    PhyloTreeEnvState,
 )
 from .reward import (
     BitseqRewardModule,
     EasyHypergridRewardModule,
+    EqxProxyAMPRewardModule,
+    EqxProxyGFPRewardModule,
     GeneralHypergridRewardModule,
-    HardHypergridRewardModule,
-    PhyloTreeRewardModule,
-    ProxyAMPRewardModule,
-    ProxyGFPRewardModule,
+    HardHypergridRewardModule
 )
 
 __all__ = [
@@ -52,6 +53,8 @@ __all__ = [
     "BitseqEnvState",
     "BitseqRewardModule",
     "EasyHypergridRewardModule",
+    "EqxProxyAMPRewardModule",
+    "EqxProxyGFPRewardModule",
     "GFPEnvironment",
     "GFPEnvParams",
     "GFPEnvState",
@@ -60,8 +63,6 @@ __all__ = [
     "HypergridEnvironment",
     "HypergridEnvParams",
     "HypergridEnvState",
-    "ProxyAMPRewardModule",
-    "ProxyGFPRewardModule",
     "TAction",
     "TBackwardAction",
     "TDone",
@@ -73,8 +74,17 @@ __all__ = [
     "TReward",
     "TRewardModule",
     "TRewardParams",
-    PhyloTreeEnvironment,
-    PhyloTreeEnvParams,
-    PhyloTreeEnvState,
-    PhyloTreeRewardModule,
 ]
+
+# Lazy import of networks since networks are based on Equinox
+import importlib
+
+
+def __getattr__(name):
+    if name == "networks":
+        return importlib.import_module(f"{__name__}.networks")
+    raise AttributeError(f"module {__name__} has no attribute {name}")
+
+
+def __dir__():
+    return __all__

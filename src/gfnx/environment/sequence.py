@@ -3,7 +3,7 @@ from typing import Any, Dict, Tuple
 import chex
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Int
+from jaxtyping import Array, Bool, Int
 
 from .. import spaces
 from ..base import (
@@ -388,7 +388,7 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
         """
         Environment-specific step backward transition. Rewards always zero!
         """
-        is_init_state = jnp.all(state.tokens == self.pad_token)
+        is_initial = state.is_initial
         time = state.time
 
         def get_prev_state_init_state(
@@ -400,7 +400,7 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
             state: EnvState, backward_action: TAction
         ) -> EnvState:
             prev_tokens = state.tokens.at[backward_action].set(self.pad_token)
-            is_initial = jnp.all(prev_tokens != self.pad_token)
+            is_initial = jnp.all(prev_tokens == self.pad_token)
             return state.replace(
                 tokens=prev_tokens,
                 time=time - 1,
@@ -409,7 +409,7 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
             )
 
         prev_state: EnvState = jax.lax.cond(
-            is_init_state,
+            is_initial,
             get_prev_state_init_state,
             get_prev_state_not_init_state,
             state,
@@ -555,7 +555,7 @@ class PrependAppendSequenceEnvironment(SequenceEnvironment):
         env_params: EnvParams,
     ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
         """
-        Environment-specific step backward transition. Rewards always zero!
+        Environment-specific step backward transition. Rewards are always zero!
         """
         is_initial = state.is_initial
         time = state.time
@@ -589,7 +589,7 @@ class PrependAppendSequenceEnvironment(SequenceEnvironment):
                 tokens=prev_tokens,
                 time=time - 1,
                 is_terminal=False,
-                in_initial=is_initial,
+                is_initial=is_initial,
             )
 
         prev_state: EnvState = jax.lax.cond(
@@ -655,5 +655,4 @@ class PrependAppendSequenceEnvironment(SequenceEnvironment):
     def backward_action_space(self) -> spaces.Discrete:
         """Backward action space of the environment,
         only about removing the last character."""
-        return spaces.Discrete(2)
         return spaces.Discrete(2)

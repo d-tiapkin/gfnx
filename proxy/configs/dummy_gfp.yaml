@@ -7,13 +7,13 @@ network:
   # Input size and output size are computed based on the environment
   encoder_params:
     vocab_size: 29
-    max_length: 237
-    num_heads: 8
-    num_layers: 4
+    max_length: 60
+    num_heads: 1
+    num_layers: 1
 
-    embedding_size: 64
-    hidden_size: 64
-    intermediate_size: 64
+    embedding_size: 32
+    hidden_size: 32
+    intermediate_size: 32
 
     dropout_rate: 0.0
     attention_dropout_rate: 0.0
@@ -23,10 +23,10 @@ training:
   batch_size: 256
   learning_rate: 1e-4
   weight_decay: 1e-6
-  num_epochs: 1000    # Very large number, but we will use early stopping
+  num_epochs: 1    # Very large number, but we will use early stopping
   val_each_epoch: 1   # In the BioGFN code, they do validation each 100 batches, in our case one epoch is 175 batches
   early_stop_tol: 5
   task: 'regression'
 
 seed: 1
-save_path: proxy/weights/gfp/
+save_path: proxy/weights/dummy_gfp/

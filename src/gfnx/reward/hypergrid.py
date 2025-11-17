@@ -46,7 +46,7 @@ class GeneralHypergridRewardModule(
             + jnp.prod((ax < 0.4) * (ax > 0.3), axis=-1) * self.R2
         )
         chex.assert_shape(reward, (state.shape[0],))  # [B]
-        return jnp.clip(reward, a_min=self.min_reward)
+        return jnp.clip(reward, min=self.min_reward)
 
     def log_reward(
         self, state: HypergridEnvState, env_params: HypergridEnvParams

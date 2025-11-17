@@ -1,37 +1,38 @@
-import functools
-
-from omegaconf import DictConfig, OmegaConf
-import hydra
-from hydra.utils import instantiate
+from dataclasses import dataclass
+import os
 
 import chex
+import equinox as eqx
+import hydra
 import jax
 import jax.numpy as jnp
-import flax.linen as nn
-from flax.training.train_state import TrainState
 import optax
 import orbax.checkpoint as ocp
-
-from gfnx.proxy.datasets.base import RewardProxyDataset
-from jax_tqdm import loop_tqdm
+from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
-@chex.dataclass
-class RewardProxyTrainingConfig():
+from gfnx.networks.reward_models import EqxTransformerRewardModel
+
+from datasets.amp import AMPRewardProxyDataset
+from datasets.base import RewardProxyDataset
+from datasets.gfp import GFPRewardProxyDataset
+
+@dataclass
+class RewardProxyTrainingConfig:
     batch_size: int
     learning_rate: float
     weight_decay: float
     num_epochs: int
     val_each_epoch: int
     early_stop_tol: int
-    # also task: str   # ["classification", "regression"] should be defined, but it is not included in the cfg file
+    task: str  # ["classification", "regression"]
+
 
 def fit_model(
     rng_key: chex.PRNGKey,
-    network: nn.Module,
+    model: eqx.Module,
     dataset: RewardProxyDataset,
     config: RewardProxyTrainingConfig,
-    task: str
 ) -> chex.ArrayTree:
     train_data, train_score = dataset.train_set()
     val_data, val_score = dataset.test_set()
@@ -42,136 +43,150 @@ def fit_model(
     train_size = train_data.shape[0]
     val_size = val_data.shape[0]
 
-    rng_key, init_rng_key = jax.random.split(rng_key)
-    params = network.init(init_rng_key, train_data[:1], training=False)
+    batch_loss_fn = {
+        "classification": optax.losses.sigmoid_binary_cross_entropy,
+        "regression": optax.losses.squared_error,
+    }[config.task]
 
-    param_count = sum(x.size for x in jax.tree_util.tree_leaves(params))
-    print(f'Number of parameters : {param_count}')
-
-    optimizer = optax.adamw(learning_rate=config.learning_rate, weight_decay=config.weight_decay)
-    
-    tr_state = TrainState.create(
-        apply_fn=network.apply,
-        tx=optimizer,
-        params=params,
+    param_count = sum(
+        x.size
+        for x in jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array))
     )
-    best_loss = 1e10    # Some large number
+    print(f"Number of parameters : {param_count}")
+
+    optimizer = optax.adamw(
+        learning_rate=config.learning_rate, weight_decay=config.weight_decay
+    )
+    opt_state = optimizer.init(eqx.filter(model, eqx.is_array))
+
+    best_loss = 1e10  # Some large number
     early_stop_count = 0
-    best_params = tr_state.params.copy()
+    best_model = model
 
-    
-    @functools.partial(jax.jit, static_argnums=(1,2))
-    def epoch_train_step(rng_key : chex.PRNGKey, task: str, batch_size: int, tr_state : TrainState, data : chex.Array, target : chex.Array):
-        max_steps = data.shape[0] // batch_size  # statis variable
-        @chex.dataclass
-        class LoopCarry:
-            data: chex.Array
-            target: chex.Array
-            tr_state: TrainState
-            rng_key: chex.PRNGKey
-            total_train_loss: float = 0.0
-            total_train_batches: int = 0
+    @eqx.filter_jit
+    def update(
+        model: eqx.Module,
+        opt_state: optax.OptState,
+        data: chex.Array,
+        target: chex.Array,
+        key: chex.PRNGKey,
+    ):
+        def loss_fn(model, data, target, keys):
+            pred_score = jax.vmap(
+                lambda x, key: model(x, enable_dropout=True, key=key)
+            )(data, keys).squeeze()
+            return batch_loss_fn(pred_score, target).mean()
 
-        def loop_body(idx : int, loop_carry: LoopCarry):
-            rng_key, batch_rng_key = jax.random.split(loop_carry.rng_key)
-            true_idx = idx * batch_size
+        keys = jax.random.split(key, data.shape[0])
+        loss, grad = eqx.filter_value_and_grad(loss_fn)(
+            model, data, target, keys
+        )
+        updates, new_opt_state = optimizer.update(
+            grad, opt_state, eqx.filter(model, eqx.is_array)
+        )
+        new_model = eqx.apply_updates(model, updates)
+        return new_model, new_opt_state, loss
 
-            batch_data = jax.lax.dynamic_slice_in_dim(loop_carry.data, true_idx, batch_size)
-            batch_target = jax.lax.dynamic_slice_in_dim(loop_carry.target, true_idx, batch_size)
-            tr_state = loop_carry.tr_state
-            total_train_loss = loop_carry.total_train_loss
-            total_train_batches = loop_carry.total_train_batches
-
-            def loss_fn(params, task, tr_state, batch_data, batch_target, rng_key):
-                pred_score = tr_state.apply_fn(params, batch_data, training=True, rngs={"dropout": rng_key}).squeeze()
-                if task == "classification":
-                    loss = optax.losses.sigmoid_binary_cross_entropy(pred_score, batch_target).mean()
-                elif task == "regression":
-                    loss = optax.losses.squared_error(pred_score, batch_target).mean()
-                else:
-                    raise ValueError("Invalid task type") # It will not be raised, but just in case
-                return loss
-
-            grad_fn = jax.value_and_grad(loss_fn)   # loss_fn is defined above
-            loss, grads = grad_fn(tr_state.params, task, tr_state, batch_data, batch_target, batch_rng_key)
-            tr_state = tr_state.apply_gradients(grads=grads)
-
-            total_train_loss = total_train_loss + loss
-            total_train_batches = total_train_batches + 1
-            return LoopCarry(
-                data=loop_carry.data, 
-                target=loop_carry.target, 
-                tr_state=tr_state, 
-                rng_key=rng_key,
-                total_train_loss=total_train_loss, 
-                total_train_batches=total_train_batches
-            ) 
-        
-        final_loop_carry = jax.lax.fori_loop(0, max_steps, loop_body, LoopCarry(data=data, target=target, tr_state=tr_state, rng_key=rng_key))
-        return final_loop_carry.tr_state, final_loop_carry.total_train_loss / final_loop_carry.total_train_batches
-
-    print('Start training')
+    print("Start training")
     for epoch in tqdm(range(config.num_epochs)):
         # Shuffle dataset in the start of each epoch
         rng_key, shuffle_rng_key = jax.random.split(rng_key)
-        shuffle_idx = jax.random.permutation(shuffle_rng_key, jnp.arange(train_size))
-        train_data, train_score = train_data[shuffle_idx], train_score[shuffle_idx]
+        shuffle_idx = jax.random.permutation(
+            shuffle_rng_key, jnp.arange(train_size)
+        )
+        train_data, train_score = (
+            train_data[shuffle_idx],
+            train_score[shuffle_idx],
+        )
+        train_loss = 0.0
+        n_batches = 0
         # Training loop
-        tr_state, train_avg_loss = epoch_train_step(rng_key, task, config.batch_size, tr_state, train_data, train_score)
-        print(f"Epoch {epoch+1}/{config.num_epochs}, Train loss: {train_avg_loss}")
+        for idx in range(0, train_size, config.batch_size):
+            batch_end_idx = min(train_size, idx + config.batch_size)
+            batch_data, batch_target = (
+                train_data[idx:batch_end_idx],
+                train_score[idx:batch_end_idx],
+            )
+            rng_key, batch_key = jax.random.split(rng_key)
+            model, opt_state, loss = update(
+                model, opt_state, batch_data, batch_target, batch_key
+            )
+            train_loss += loss
+            n_batches += 1
+
+        print(
+            f"Epoch {epoch + 1}/{config.num_epochs}",
+            f"Train loss: {train_loss / n_batches}",
+        )
         # Validation loop
-        if epoch % config.val_each_epoch == 0 or epoch+1 == config.num_epochs:
-            total_val_loss = 0.0
-            total_val_batches = 0
-            total_val_acc = 0.0
-            for idx in tqdm(range(0, val_size, config.batch_size)):
-                batch_end_idx = min(val_size, idx+config.batch_size)
-                batch_data, batch_target = val_data[idx:batch_end_idx], val_score[idx:batch_end_idx]
-                # TODO: Add validation loss calculation here
-                pred_score = tr_state.apply_fn(tr_state.params, batch_data, training=False).squeeze()
-                if task == "classification":
-                    loss = optax.losses.sigmoid_binary_cross_entropy(pred_score, batch_target).mean()
-                    acc = jnp.mean(jnp.equal(pred_score > 0, batch_target))
-                elif task == "regression":
-                    loss = optax.losses.squared_error(pred_score, batch_target).mean()
-                    acc = 0.0   # Incorrect in this case
-                else:
-                    raise ValueError("Invalid task type") # It will not be raised, but just in case
+        total_val_loss = 0.0
+        total_val_batches = 0
+        total_val_acc = 0.0
+        for idx in range(0, val_size, config.batch_size):
+            batch_end_idx = min(val_size, idx + config.batch_size)
+            batch_data, batch_target = (
+                val_data[idx:batch_end_idx],
+                val_score[idx:batch_end_idx],
+            )
 
-                total_val_loss += loss
-                total_val_acc += acc
-                total_val_batches += 1
-                
-            average_val_loss = total_val_loss / total_val_batches
-            if task == "classification":
-                average_val_acc = total_val_acc / total_val_batches
-                print(f"Validation loss: {average_val_loss}, acc: {average_val_acc}")
+            rng_key, batch_key = jax.random.split(rng_key)
+            batch_keys = jax.random.split(batch_key, batch_data.shape[0])
+            pred_score = jax.vmap(
+                lambda x, key: model(x, enable_dropout=True, key=key)
+            )(batch_data, batch_keys).squeeze()
+            loss = batch_loss_fn(pred_score, batch_target).mean()
+            if config.task == "classification":
+                acc = jnp.mean(jnp.equal(pred_score > 0, batch_target))
             else:
-                print(f"Validation loss: {average_val_loss}")
-            if average_val_loss < best_loss:
-                best_loss = average_val_loss
-                best_params = tr_state.params.copy()
-                early_stop_count = 0 
-            else:
-                early_stop_count += 1
-                if early_stop_count >= config.early_stop_tol:
-                    print(f"Early stopping at epoch {epoch+1}")
-                    break
-    
+                # Dummy value for regression task
+                acc = -1.0
+
+            total_val_loss += loss
+            total_val_acc += acc
+            total_val_batches += 1
+
+        average_val_loss = total_val_loss / total_val_batches
+        average_val_acc = total_val_acc / total_val_batches
+        print(f"Validation loss: {average_val_loss}")
+        if average_val_acc > 0:
+            print(f"Accuracy: {average_val_acc}")
+
+        if average_val_loss < best_loss:
+            best_loss = average_val_loss
+            best_model = model
+            early_stop_count = 0
+        else:
+            early_stop_count += 1
+            if early_stop_count >= config.early_stop_tol:
+                print(f"Early stopping at epoch {epoch + 1}")
+                break
+
     print(f"Best loss: {best_loss}")
-    return best_params
+    return best_model
 
-import os
-os.environ['XLA_FLAGS'] = (
-    '--xla_gpu_triton_gemm_any=True '
-)
-os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.2'
 
 @hydra.main(config_path="configs/", config_name="amp")
-def main(cfg : DictConfig) -> None:
+def main(cfg: DictConfig) -> None:
     print(OmegaConf.to_yaml(cfg))
-    dataset = instantiate(cfg.dataset)
-    network = instantiate(cfg.network)
+    rng_key = jax.random.PRNGKey(cfg.seed)
+    rng_key, init_key = jax.random.split(rng_key)
+
+    if cfg.dataset.name == "amp":
+        dataset = AMPRewardProxyDataset(**cfg.dataset.params)
+    elif cfg.dataset.name == "gfp":
+        dataset = GFPRewardProxyDataset(**cfg.dataset.params)
+    else:
+        raise ValueError(f"Unknown dataset: {cfg.dataset.name}")
+
+    network = EqxTransformerRewardModel(
+        encoder_params={
+            "pad_id": dataset.char_to_id["[PAD]"],
+            **OmegaConf.to_container(cfg.network.encoder_params),
+        },
+        offset=dataset.offset,
+        output_dim=cfg.network.output_dim,
+        key=init_key,
+    )
     train_cfg = RewardProxyTrainingConfig(
         batch_size=cfg.training.batch_size,
         learning_rate=cfg.training.learning_rate,
@@ -179,15 +194,23 @@ def main(cfg : DictConfig) -> None:
         num_epochs=cfg.training.num_epochs,
         val_each_epoch=cfg.training.val_each_epoch,
         early_stop_tol=cfg.training.early_stop_tol,
+        task=cfg.training.task,
     )
-    task=cfg.training.task
 
-    rng_key = jax.random.PRNGKey(cfg.seed)
-    best_params = fit_model(rng_key, network, dataset, train_cfg, task)
+    best_model = fit_model(rng_key, network, dataset, train_cfg)
 
-    path = ocp.test_utils.erase_and_create_empty(cfg.save_path)
-    orbax_checkpointer = ocp.StandardCheckpointer()
-    orbax_checkpointer.save(path / 'final_model', best_params)
+    path = cfg.save_path
+    if not os.path.isabs(path):
+        # Assume that the path is relative to the root of the project
+        module_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..")
+        )
+        path = os.path.join(module_path, path)
+    path = ocp.test_utils.erase_and_create_empty(path)
+    ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
+    ckptr.save(path / "model", args=ocp.args.StandardSave(best_model))
+    ckptr.wait_until_finished()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

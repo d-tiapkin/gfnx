@@ -4,7 +4,7 @@ from typing import Any, TypeVar
 import chex
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Int
+from jaxtyping import Array, Bool, Float
 
 from ..base import (
     TAction,

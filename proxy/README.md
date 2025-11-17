@@ -1,3 +1,9 @@
-The part to train and to store the proxy networks. The main TODO: write it down properly in Equinox.
+# Proxy Network Training and Storage Instructions
 
-TODO: move the definition of these networks to inner packages.
+## Usage
+
+To train the proxy network using the specified configuration, run the following command:
+
+```bash
+python proxy/train_proxy.py --config-name amp
+```
