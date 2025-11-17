@@ -6,11 +6,8 @@ from .hypergrid import (
     GeneralHypergridRewardModule,
     HardHypergridRewardModule,
 )
-<<<<<<< HEAD
 from .phylogenetic_tree import PhyloTreeRewardModule
-=======
 from .tfbind import TFBind8RewardModule
->>>>>>> 500355c (Finalyse TFBind environment)
 
 __all__ = [
     "BitseqRewardModule",
@@ -19,9 +16,6 @@ __all__ = [
     "EqxProxyGFPRewardModule",
     "GeneralHypergridRewardModule",
     "HardHypergridRewardModule",
-<<<<<<< HEAD
     "PhyloTreeRewardModule",
-=======
     "TFBind8RewardModule",
->>>>>>> 500355c (Finalyse TFBind environment)
 ]
