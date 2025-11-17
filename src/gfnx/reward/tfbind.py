@@ -49,12 +49,14 @@ class TFBind8RewardModule(
             list(itertools.product(values, repeat=self.max_length))
         )
 
+        # Source: https://github.com/maxwshen/gflownet/blob/main/datasets/tfbind8/tfbind8-exact-v0-all.pkl
         with open('proxy/weights/tfbind/tfbind8-exact-v0-all.pkl', 'rb') as f:
             oracle_d = pickle.load(f)
         oracle = {tuple(x): float(y[0]) for x, y in zip(oracle_d['x'], oracle_d['y'])}
 
         values_raw = jnp.array([oracle[tuple(state)] for state in all_states])
         
+        # Normalization as in https://github.com/maxwshen/gflownet/blob/main/exps/tfbind8/tfbind8_oracle.py
         values = jnp.pow(values_raw, self.reward_exponent)
         values = (values * self.reward_scale / values.max())
         values = jnp.clip(values, min=self.min_reward)

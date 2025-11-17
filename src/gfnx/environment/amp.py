@@ -3,11 +3,11 @@ from ..utils import AMINO_ACIDS, PROTEINS_FULL_ALPHABET
 from .sequence import (
     EnvParams,  # noqa: F401
     EnvState,  # noqa: F401
-    PrependAppendSequenceEnvironment,
+    AutoregressiveSequenceEnvironment,
 )
 
 
-class AMPEnvironment(PrependAppendSequenceEnvironment):
+class AMPEnvironment(AutoregressiveSequenceEnvironment):
     def __init__(self, reward_module: TRewardModule) -> None:
         self.char_to_id = {
             char: i for i, char in enumerate(PROTEINS_FULL_ALPHABET)

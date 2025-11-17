@@ -329,6 +329,142 @@ class FixedAutoregressiveSequenceEnvironment(SequenceEnvironment):
         only about removing the last character."""
         return spaces.Discrete(1)
 
+# Might contain some bugs
+class AutoregressiveSequenceEnvironment(SequenceEnvironment):
+    """
+    Class for sequence environments with a fixed length and 
+    non-autoregressive generation.
+    """
+
+    def _single_transition(
+        self,
+        state: EnvState,
+        action: TAction,
+        env_params: EnvParams,
+    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+        is_terminal = state.is_terminal
+        time = state.time
+
+        def get_next_state_terminal(
+            state: EnvState, action: TAction
+        ) -> EnvState:
+            return state.replace(is_pad=True)
+
+        def get_next_state_not_terminal(
+            state: EnvState, action: TAction
+        ) -> EnvState:
+            pos_to_update = time # time is exactly the position to update
+            action_to_token = jnp.where(action != self.nchar, action, self.eos_token)
+            next_tokens = state.tokens.at[pos_to_update].set(action_to_token)
+            is_done = jnp.logical_or(
+                jnp.all(next_tokens != self.pad_token), 
+                # All pad tokens are replaced by characters
+                action == self.nchar  # EOS token is generated
+            )
+            next_state = EnvState(
+                tokens=next_tokens,
+                time=time + 1,
+                is_terminal=is_done,
+                is_initial=False,
+                is_pad=False,
+            )
+            return next_state
+
+        next_state : EnvState = jax.lax.cond(
+            is_terminal, 
+            get_next_state_terminal, get_next_state_not_terminal,
+            state, action
+        )
+
+        return next_state, next_state.is_terminal, {}
+
+    def _single_backward_transition(
+        self, 
+        state: EnvState, 
+        backward_action: TBackwardAction, 
+        env_params: EnvParams
+    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+        """
+        Environment-specific step backward transition. Rewards always zero!
+        """
+        is_initial = state.is_initial
+        time = state.time
+
+        def get_prev_state_init_state(
+            state: EnvState, backward_action: TAction
+        ) -> EnvState:
+            return state.replace(is_pad=True)
+
+        def get_prev_state_not_init_state(
+            state: EnvState, backward_action: TAction
+        ) -> EnvState:
+            prev_tokens = state.tokens.at[state.time-1].set(self.pad_token)
+            is_initial = jnp.all(prev_tokens == self.pad_token)
+            return state.replace(
+                tokens=prev_tokens,
+                time=time - 1,
+                is_terminal=False,
+                is_initial=is_initial,
+            )
+
+        prev_state: EnvState = jax.lax.cond(
+            is_initial,
+            get_prev_state_init_state,
+            get_prev_state_not_init_state,
+            state,
+            backward_action,
+        )
+        return prev_state, prev_state.is_initial, {}
+
+    def get_backward_action(
+        self,
+        state: EnvState,
+        forward_action: chex.Array,
+        next_state: EnvState,
+        env_params: EnvParams,
+    ) -> chex.Array:
+        """Returns backward action given the complete characterization 
+        of the forward transition."""
+        num_envs = state.time.shape[0]
+        return jnp.zeros((num_envs,), dtype=forward_action.dtype)
+
+    def get_forward_action(
+        self,
+        state: EnvState,
+        backward_action: chex.Array,
+        prev_state: EnvState,
+        env_params: EnvParams,
+    ) -> chex.Array:
+        """Returns forward action given the complete characterization 
+        of the backward transition."""
+        num_envs = state.time.shape[0]
+        return state.tokens[jnp.arange(num_envs), state.time - 1]
+
+    def get_invalid_mask(
+        self, state: EnvState, env_params: EnvParams
+    ) -> chex.Array:
+        """Return mask of invalid actions"""
+        num_envs = state.time.shape[0]
+        return jnp.zeros((num_envs, self.nchar + 1), dtype=jnp.bool)
+
+    def get_invalid_backward_mask(
+        self, state: EnvState, env_params: EnvParams
+    ) -> chex.Array:
+        """Returns mask of invalid backward actions."""
+        num_envs = state.time.shape[0]
+        return jnp.zeros((num_envs, 1), dtype=jnp.bool)
+
+    @property
+    def action_space(self) -> spaces.Discrete:
+        """Action space of the environment, consists of characters 
+        and EOS token"""
+        return spaces.Discrete(self.nchar + 1)
+
+    @property
+    def backward_action_space(self) -> spaces.Discrete:
+        """Backward action space of the environment, 
+        only about removing the last character."""
+        return spaces.Discrete(1)
 
 class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
     """
@@ -476,7 +612,7 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
         """Backward action space of the environment, consists of position"""
         return spaces.Discrete(self.max_length)
 
-
+# Possibly contains some bugs
 class PrependAppendSequenceEnvironment(SequenceEnvironment):
     """
     Class for sequence environments with a fixed length and
@@ -655,3 +791,4 @@ class PrependAppendSequenceEnvironment(SequenceEnvironment):
         """Backward action space of the environment,
         only about removing the last character."""
         return spaces.Discrete(2)
+
