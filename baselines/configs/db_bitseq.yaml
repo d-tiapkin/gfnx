@@ -8,7 +8,7 @@ num_envs: 16
 agent:
   learning_rate: 1e-3
   eps_exploration: 1e-3
-  train_backward: true
+  train_backward: false
 
 network:
   # Input size and output size are computed based on the environment
@@ -19,18 +19,18 @@ network:
   hidden_size: 64
   intermediate_size: 64
 
-  dropout_rate: 0.1
+  dropout_rate: 0.0
   attention_dropout_rate: 0.0
 
 environment:
-  k: 4
+  k: 8
   n: 120
   num_modes: 60
-  reward_exponent: 2.0
+  reward_exponent: 3.0
 
 metrics:
   n_rounds : 10
-  batch_size : 16
+  batch_size : 7200
   mode_threshold : 30
 
 logging:

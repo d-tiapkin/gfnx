@@ -47,15 +47,19 @@ class TransformerPolicy(eqx.Module):
     """
 
     encoder: gfnx.networks.Encoder
-    pooler: eqx.nn.Linear
+    forward_pooler: eqx.nn.Linear
+    backward_pooler: eqx.nn.Linear
+    flow_pooler: eqx.nn.Linear
     train_backward_policy: bool
     n_fwd_actions: int
     n_bwd_actions: int
+    env_max_length: int
 
     def __init__(
         self,
         n_fwd_actions: int,
         n_bwd_actions: int,
+        env_max_length: int,
         train_backward_policy: bool,
         encoder_params: dict,
         *,
@@ -64,16 +68,26 @@ class TransformerPolicy(eqx.Module):
         self.train_backward_policy = train_backward_policy
         self.n_fwd_actions = n_fwd_actions
         self.n_bwd_actions = n_bwd_actions
-
-        output_size = self.n_fwd_actions + 1  # +1 for flow
-        if train_backward_policy:
-            output_size += n_bwd_actions
+        self.env_max_length = env_max_length
 
         encoder_key, pooler_key = jax.random.split(key)
         self.encoder = gfnx.networks.Encoder(key=encoder_key, **encoder_params)
-        self.pooler = eqx.nn.Linear(
+        
+        self.forward_pooler = eqx.nn.Linear(
             in_features=encoder_params["hidden_size"],
-            out_features=output_size,
+            out_features=self.n_fwd_actions // self.env_max_length,
+            key=pooler_key,
+        )
+
+        self.backward_pooler = eqx.nn.Linear(
+            in_features=encoder_params["hidden_size"],
+            out_features=self.n_bwd_actions // self.env_max_length,
+            key=pooler_key,
+        )
+
+        self.flow_pooler = eqx.nn.Linear(
+            in_features=encoder_params["hidden_size"],
+            out_features=1,
             key=pooler_key,
         )
 
@@ -88,15 +102,16 @@ class TransformerPolicy(eqx.Module):
         encoded_obs = self.encoder(obs_ids, pos_ids, enable_dropout=enable_dropout, key=key)[
             "layers_out"
         ][-1]  # [seq_len, hidden_size]
-        encoded_obs = encoded_obs.mean(axis=0)  # Average pooling
-        output = self.pooler(encoded_obs)
+
+        forward_logits = jnp.ravel(jax.vmap(self.forward_pooler)(encoded_obs[1:]))
+        flow = self.flow_pooler(encoded_obs[0])
+        #jax.debug.print("hello {bar}", bar=flow.shape)
+
         if self.train_backward_policy:
-            forward_logits, flow, backward_logits = jnp.split(
-                output, [self.n_fwd_actions, self.n_fwd_actions + 1], axis=-1
-            )
+            backward_logits = jnp.ravel(jax.vmap(self.backward_pooler)(encoded_obs[1:]))
         else:
-            forward_logits, flow = jnp.split(output, [self.n_fwd_actions], axis=-1)
             backward_logits = jnp.zeros(shape=(self.n_bwd_actions,), dtype=jnp.float32)
+            
         return {
             "forward_logits": forward_logits,
             "log_flow": flow.squeeze(-1),
@@ -138,9 +153,8 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         )(env_obs, jax.random.split(rng_key, env_obs.shape[0]))
         # With probability epsilon, return zero logits and the same policy outputs
         epsilon = train_state.config.agent.eps_exploration
-        do_explore = jax.random.bernoulli(explore_key, epsilon)
-        zero_logits = jnp.zeros_like(policy_outputs["forward_logits"])
-        forward_logits = jnp.where(do_explore, zero_logits, policy_outputs["forward_logits"])
+        explore_mask = jax.random.bernoulli(explore_key, epsilon, (env_obs.shape[0],))
+        forward_logits = jnp.where(explore_mask[..., None], 0, policy_outputs["forward_logits"])
         return forward_logits, policy_outputs
 
     # Generating the trajectory and splitting it into transitions
@@ -322,6 +336,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     model = TransformerPolicy(
         n_fwd_actions=env.action_space.n,
         n_bwd_actions=env.backward_action_space.n,
+        env_max_length=env.max_length,
         train_backward_policy=cfg.agent.train_backward,
         encoder_params={
             "pad_id": -1,  # We don't mask padding in bitseq env
