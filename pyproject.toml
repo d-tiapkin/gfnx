@@ -49,7 +49,7 @@ exclude = [
     "__pycache__",
 ]
 line-length = 79
-indent-width = 2
+indent-width = 4
 target-version = "py310"
 
 

@@ -5,8 +5,9 @@ import jax
 import jax.numpy as jnp
 
 import gfnx
-from ..base import BaseEnvState, BaseEnvParams, BaseVecEnvironment
 import gfnx.spaces as spaces
+
+from ..base import BaseEnvParams, BaseEnvState, BaseVecEnvironment
 
 
 @chex.dataclass(frozen=True)
@@ -18,15 +19,16 @@ class EnvState(BaseEnvState):
 
 @chex.dataclass(frozen=True)
 class EnvParams(BaseEnvParams):
-    max_length : int
-    nchar : int
-    ntoken : int
+    max_length: int
+    nchar: int
+    ntoken: int
 
-    bos_token : int
-    eos_token : int
-    pad_token : int
+    bos_token: int
+    eos_token: int
+    pad_token: int
 
     reward_params: gfnx.TRewardParams
+
 
 class SequenceEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
     """
@@ -36,13 +38,13 @@ class SequenceEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
     def __init__(
         self,
         reward_module: gfnx.TRewardModule,
-        max_length: int,    # Maximal length of the sequence
-        nchar: int,         # Number of active characters in the vocabulary
-        ntoken: int,        # Size of the vocabulary including special tokens
+        max_length: int,  # Maximal length of the sequence
+        nchar: int,  # Number of active characters in the vocabulary
+        ntoken: int,  # Size of the vocabulary including special tokens
         *,
-        bos_token: int,     # id of beginning of sentence token
-        eos_token: int,     # id of end of sentence token
-        pad_token: int,     # id of padding token
+        bos_token: int,  # id of beginning of sentence token
+        eos_token: int,  # id of end of sentence token
+        pad_token: int,  # id of padding token
     ) -> None:
         super().__init__(reward_module)
         self.max_length = max_length
@@ -57,19 +59,17 @@ class SequenceEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         # Fill empty tokens with [PAD] token
         return EnvState(
             tokens=jnp.full(
-                shape=(num_envs, self.max_length), 
+                shape=(num_envs, self.max_length),
                 fill_value=self.pad_token,  # [PAD] token
-                dtype=jnp.int32
-            ), 
+                dtype=jnp.int32,
+            ),
             is_done=jnp.zeros((num_envs,), dtype=jnp.bool),
-            time=jnp.zeros((num_envs,), dtype=jnp.int32)
+            time=jnp.zeros((num_envs,), dtype=jnp.int32),
         )
 
     def init(self, rng_key: chex.PRNGKey) -> EnvParams:
         dummy_state = self.get_init_state(1)
-        reward_params = self.reward_module.init(
-            rng_key, dummy_state
-        )
+        reward_params = self.reward_module.init(rng_key, dummy_state)
         return EnvParams(
             reward_params=reward_params,
             max_length=self.max_length,
@@ -77,7 +77,7 @@ class SequenceEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             ntoken=self.ntoken,
             bos_token=self.bos_token,
             eos_token=self.eos_token,
-            pad_token=self.pad_token
+            pad_token=self.pad_token,
         )
 
     @property
@@ -96,7 +96,7 @@ class SequenceEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         self,
         state: EnvState,
         backward_action: gfnx.TBackwardAction,
-        env_params: EnvParams
+        env_params: EnvParams,
     ) -> Tuple[EnvState, gfnx.TDone, Dict[Any, Any]]:
         """
         Environment-specific step backward transition. Rewards always zero!
@@ -110,11 +110,13 @@ class SequenceEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         obs = jnp.concat(
             [
                 jnp.full(
-                    shape=(num_envs, 1), 
-                    fill_value=self.bos_token, 
-                    dtype=state.tokens.dtype),
-                state.tokens
-            ], axis=-1,
+                    shape=(num_envs, 1),
+                    fill_value=self.bos_token,
+                    dtype=state.tokens.dtype,
+                ),
+                state.tokens,
+            ],
+            axis=-1,
         )
         return obs
 
@@ -136,9 +138,7 @@ class SequenceEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
     ) -> chex.Array:
         raise NotImplementedError
 
-    def get_invalid_mask(
-        self, state: EnvState, env_params: EnvParams
-    ) -> chex.Array:
+    def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
         """Return mask of invalid actions"""
         raise NotImplementedError
 
@@ -164,25 +164,24 @@ class SequenceEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         """Observation space of the environment."""
         return spaces.Box(
             low=0,
-            high=params.ntoken,             # Includes all special tokens
-            shape=(self.max_length + 1,),   # +1 because of BOS token
+            high=params.ntoken,  # Includes all special tokens
+            shape=(self.max_length + 1,),  # +1 because of BOS token
             dtype=jnp.int32,
         )
 
     def state_space(self, params: EnvParams) -> spaces.Dict:
         """State space of the environment."""
-        return spaces.Dict(
-            {
-                "token": spaces.Box(
-                    low=0,
-                    high=params.ntoken,    # Includes special tokens 
-                                            # (e.g. PAD and EOS)
-                    shape=(self.max_length,),
-                    dtype=jnp.int32,
-                ),
-                "is_done": spaces.Box(low=0, high=1, shape=(), dtype=jnp.bool),
-            }
-        )
+        return spaces.Dict({
+            "token": spaces.Box(
+                low=0,
+                high=params.ntoken,  # Includes special tokens
+                # (e.g. PAD and EOS)
+                shape=(self.max_length,),
+                dtype=jnp.int32,
+            ),
+            "is_done": spaces.Box(low=0, high=1, shape=(), dtype=jnp.bool),
+        })
+
 
 '''
 FIX ME
@@ -315,11 +314,13 @@ class AutoregressiveSequenceEnvironment(SequenceEnvironment):
         return spaces.Discrete(1)
 '''
 
+
 class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
     """
-    Class for sequence environments with a fixed length and 
+    Class for sequence environments with a fixed length and
     non-autoregressive generation.
     """
+
     def _single_transition(
         self,
         state: EnvState,
@@ -329,29 +330,19 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
         is_done = state.is_done
         time = state.time
 
-        def get_next_state_done(
-            state: EnvState, action: gfnx.TAction
-        ) -> EnvState:
+        def get_next_state_done(state: EnvState, action: gfnx.TAction) -> EnvState:
             return state
 
-        def get_next_state_not_done(
-            state: EnvState, action: gfnx.TAction
-        ) -> EnvState:
+        def get_next_state_not_done(state: EnvState, action: gfnx.TAction) -> EnvState:
             # action is a raveled multi-index of a pair (pos, char)
-            pos, word = jnp.unravel_index(
-                action, (self.max_length, self.nchar)
-            )
+            pos, word = jnp.unravel_index(action, (self.max_length, self.nchar))
             next_tokens = state.tokens.at[pos].set(word)
             is_done = jnp.all(next_tokens != self.pad_token)
-            next_state = EnvState(
-                tokens=next_tokens, is_done=is_done, time=time + 1
-            )
+            next_state = EnvState(tokens=next_tokens, is_done=is_done, time=time + 1)
             return next_state
 
-        next_state : EnvState = jax.lax.cond(
-            is_done, 
-            get_next_state_done, get_next_state_not_done,
-            state, action
+        next_state: EnvState = jax.lax.cond(
+            is_done, get_next_state_done, get_next_state_not_done, state, action
         )
 
         return next_state, next_state.is_done, {}
@@ -360,7 +351,7 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
         self,
         state: EnvState,
         backward_action: gfnx.TBackwardAction,
-        env_params: EnvParams
+        env_params: EnvParams,
     ) -> Tuple[EnvState, gfnx.TDone, Dict[Any, Any]]:
         """
         Environment-specific step backward transition. Rewards always zero!
@@ -369,23 +360,25 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
         time = state.time
 
         def get_prev_state_done(
-            state : EnvState, backward_action : gfnx.TAction
+            state: EnvState, backward_action: gfnx.TAction
         ) -> EnvState:
             return state
 
         def get_prev_state_not_done(
-            state : EnvState, backward_action : gfnx.TAction
+            state: EnvState, backward_action: gfnx.TAction
         ) -> EnvState:
             prev_tokens = state.tokens.at[backward_action].set(self.pad_token)
             is_done = jnp.all(prev_tokens == self.pad_token)
             return EnvState(tokens=prev_tokens, is_done=is_done, time=time - 1)
 
-        prev_state : EnvState = jax.lax.cond(
-            is_done, 
-            get_prev_state_done, get_prev_state_not_done,
-            state, backward_action
+        prev_state: EnvState = jax.lax.cond(
+            is_done,
+            get_prev_state_done,
+            get_prev_state_not_done,
+            state,
+            backward_action,
         )
-        return  prev_state, prev_state.is_done, {}
+        return prev_state, prev_state.is_done, {}
 
     def get_backward_action(
         self,
@@ -395,9 +388,7 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
         env_params: EnvParams,
     ) -> chex.Array:
         """Returns backward action given the forward transition."""
-        pos, _ = jnp.unravel_index(
-            forward_action, (self.max_length, self.nchar)
-        )
+        pos, _ = jnp.unravel_index(forward_action, (self.max_length, self.nchar))
         return pos
 
     def get_forward_action(
@@ -409,18 +400,13 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
     ) -> chex.Array:
         """Returns forward action given the backward transition."""
         word = jnp.take_along_axis(
-            state.tokens, 
-            jnp.expand_dims(backward_action, axis=1),
-            axis=1
+            state.tokens, jnp.expand_dims(backward_action, axis=1), axis=1
         ).squeeze()
         return jnp.ravel_multi_index(
-            (backward_action, word),
-            (self.max_length, self.nchar)
+            (backward_action, word), (self.max_length, self.nchar)
         )
 
-    def get_invalid_mask(
-        self, state: EnvState, env_params: EnvParams
-    ) -> chex.Array:
+    def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
         """Return mask of invalid actions"""
         pos_mask = state.tokens != self.pad_token  # [B, token_len]
         chex.assert_shape(pos_mask, (state.tokens.shape[0], self.max_length))
@@ -428,8 +414,7 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
             jnp.expand_dims(pos_mask, axis=2), repeats=self.nchar, axis=2
         )
         chex.assert_shape(
-            invalid_mask_2d, 
-            (state.tokens.shape[0], self.max_length, self.nchar)
+            invalid_mask_2d, (state.tokens.shape[0], self.max_length, self.nchar)
         )
         return invalid_mask_2d.reshape(state.tokens.shape[0], -1)
 
@@ -441,7 +426,7 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
 
     @property
     def action_space(self) -> spaces.Discrete:
-        """Action space of the environment, consists of pairs 
+        """Action space of the environment, consists of pairs
         (position, word)"""
         return spaces.Discrete(self.max_length * self.nchar)
 
@@ -453,7 +438,7 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
 
 class PrependAppendSequenceEnvironment(SequenceEnvironment):
     """
-    Class for sequence environments with a fixed length and 
+    Class for sequence environments with a fixed length and
     non-autoregressive generation.
     """
 
@@ -466,53 +451,42 @@ class PrependAppendSequenceEnvironment(SequenceEnvironment):
         is_done = state.is_done
         time = state.time
 
-        def get_next_state_done(
-            state: EnvState, action: gfnx.TAction
-        ) -> EnvState:
+        def get_next_state_done(state: EnvState, action: gfnx.TAction) -> EnvState:
             return state
 
-        def get_next_state_not_done(
-            state : EnvState, action : gfnx.TAction
-        ) -> EnvState:
+        def get_next_state_not_done(state: EnvState, action: gfnx.TAction) -> EnvState:
             def get_next_tokens_prepend(
-                state : EnvState, action : gfnx.TAction
+                state: EnvState, action: gfnx.TAction
             ) -> chex.Array:
                 next_tokens = jax.lax.dynamic_update_slice(
-                    state.tokens, state.tokens[:-1], (1, )
+                    state.tokens, state.tokens[:-1], (1,)
                 )
                 return next_tokens.at[0].set(action)
 
             def get_next_tokens_append(
-                state : EnvState, action : gfnx.TAction
+                state: EnvState, action: gfnx.TAction
             ) -> chex.Array:
                 return state.tokens.at[state.time].set(
                     jnp.where(
-                        action == 2 * self.nchar, 
-                        self.eos_token, 
-                        action - self.nchar
+                        action == 2 * self.nchar, self.eos_token, action - self.nchar
                     )
                 )
 
             next_tokens = jax.lax.cond(
-                action < self.nchar, 
-                get_next_tokens_prepend, get_next_tokens_append,
-                state, action
+                action < self.nchar,
+                get_next_tokens_prepend,
+                get_next_tokens_append,
+                state,
+                action,
             )
             is_done = jnp.logical_or(
-                jnp.all(next_tokens != self.pad_token), 
-                action == 2 * self.nchar               
+                jnp.all(next_tokens != self.pad_token), action == 2 * self.nchar
             )
-            next_state = EnvState(
-                tokens=next_tokens, 
-                is_done=is_done, 
-                time=time + 1
-            )
+            next_state = EnvState(tokens=next_tokens, is_done=is_done, time=time + 1)
             return next_state
 
-        next_state : EnvState = jax.lax.cond(
-            is_done, 
-            get_next_state_done, get_next_state_not_done,
-            state, action
+        next_state: EnvState = jax.lax.cond(
+            is_done, get_next_state_done, get_next_state_not_done, state, action
         )
 
         return next_state, next_state.is_done, {}
@@ -521,7 +495,7 @@ class PrependAppendSequenceEnvironment(SequenceEnvironment):
         self,
         state: EnvState,
         backward_action: gfnx.TBackwardAction,
-        env_params: EnvParams
+        env_params: EnvParams,
     ) -> Tuple[EnvState, gfnx.TDone, Dict[Any, Any]]:
         """
         Environment-specific step backward transition. Rewards always zero!
@@ -530,37 +504,40 @@ class PrependAppendSequenceEnvironment(SequenceEnvironment):
         time = state.time
 
         def get_prev_state_done(
-            state : EnvState, backward_action : gfnx.TAction
+            state: EnvState, backward_action: gfnx.TAction
         ) -> EnvState:
             return state
 
         def get_prev_state_not_done(
-            state : EnvState, backward_action : gfnx.TAction
+            state: EnvState, backward_action: gfnx.TAction
         ) -> EnvState:
-            def get_prev_tokens_prepend(state : EnvState) -> chex.Array:
+            def get_prev_tokens_prepend(state: EnvState) -> chex.Array:
                 prev_tokens = jax.lax.dynamic_update_slice(
-                    state.tokens, state.tokens[1:], (0, )
+                    state.tokens, state.tokens[1:], (0,)
                 )
-                return prev_tokens.at[state.time-1].set(self.pad_token)
+                return prev_tokens.at[state.time - 1].set(self.pad_token)
 
-            def get_prev_tokens_append(state : EnvState) -> chex.Array:
-                return state.tokens.at[state.time-1].set(self.pad_token)
+            def get_prev_tokens_append(state: EnvState) -> chex.Array:
+                return state.tokens.at[state.time - 1].set(self.pad_token)
 
             prev_tokens = jax.lax.cond(
-                backward_action == 0, 
-                get_prev_tokens_prepend, get_prev_tokens_append,
-                state
+                backward_action == 0,
+                get_prev_tokens_prepend,
+                get_prev_tokens_append,
+                state,
             )
-            
+
             is_done = jnp.all(prev_tokens == self.pad_token)
             return EnvState(tokens=prev_tokens, is_done=is_done, time=time - 1)
 
-        prev_state : EnvState = jax.lax.cond(
-            is_done, 
-            get_prev_state_done, get_prev_state_not_done,
-            state, backward_action
+        prev_state: EnvState = jax.lax.cond(
+            is_done,
+            get_prev_state_done,
+            get_prev_state_not_done,
+            state,
+            backward_action,
         )
-        return  prev_state, prev_state.is_done, {}
+        return prev_state, prev_state.is_done, {}
 
     def get_backward_action(
         self,
@@ -582,20 +559,14 @@ class PrependAppendSequenceEnvironment(SequenceEnvironment):
         """Returns forward action given thebackward transition."""
         num_envs = state.time.shape[0]
         last_tokens_actions = jnp.where(
-            state.tokens[jnp.arange(num_envs), state.time-1] == self.eos_token,
+            state.tokens[jnp.arange(num_envs), state.time - 1] == self.eos_token,
             2 * self.nchar,
-            self.nchar + state.tokens[jnp.arange(num_envs), state.time-1]
-        )
-        
-        return jnp.where(
-            backward_action == 0, 
-            state.tokens[:, 0], 
-            last_tokens_actions
+            self.nchar + state.tokens[jnp.arange(num_envs), state.time - 1],
         )
 
-    def get_invalid_mask(
-        self, state: EnvState, env_params: EnvParams
-    ) -> chex.Array:
+        return jnp.where(backward_action == 0, state.tokens[:, 0], last_tokens_actions)
+
+    def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
         """Return mask of invalid actions"""
         num_envs = state.time.shape[0]
         return jnp.zeros((num_envs, 2 * self.nchar + 1), dtype=jnp.bool)
@@ -609,12 +580,13 @@ class PrependAppendSequenceEnvironment(SequenceEnvironment):
 
     @property
     def action_space(self) -> spaces.Discrete:
-        """Action space of the environment, consists of characters 
+        """Action space of the environment, consists of characters
         and EOS token."""
         return spaces.Discrete(2 * self.nchar + 1)
 
     @property
     def backward_action_space(self) -> spaces.Discrete:
-        """Backward action space of the environment, 
+        """Backward action space of the environment,
         only about removing the last character."""
+        return spaces.Discrete(2)
         return spaces.Discrete(2)
