@@ -7,8 +7,10 @@ num_envs: 16
 
 agent:
   learning_rate: 1e-3
-  eps_exploration: 0.00
   train_backward: false
+  start_eps: 0.0
+  end_eps: 0.0
+  exploration_steps: 1_000
 
 network:
   # Input size and output size are computed based on the environment
@@ -26,29 +28,26 @@ environment:
   proxy_config_path: proxy/configs/amp.yaml
   pretrained_proxy_path: proxy/weights/amp/model
   reward_exponent: 1.0
-  reward_ramping: 1.0
   min_reward: 1e-6
 
 metrics:
   num_traj: 2048
-  batch_size : 1000
-  n_rounds : 1
-
+  batch_size : 16
 
 logging:
   track_each: 1
   eval_each: 500
   tqdm_print_rate: 20
-  use_writer: true
+  use_writer: false
   log_dir: null # If null, dir will be automatically created
   checkpoint_dir: null # If null, dir will be automatically created
 
 # Technical information for writer
 writer:
-  writer_type: null # wandb, trackio or null (no logging online)
-  save_locally: true # Save metrics locally or not
-  entity: null
-  project: amp
+  writer_type: wandb # wandb, trackio or null (no logging online)
+  save_locally: false # Save metrics locally or not
+  entity: gfn-sampling
+  project: mctx
 
 # Technical information for hydra
 hydra:

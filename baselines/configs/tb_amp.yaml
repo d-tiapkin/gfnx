@@ -35,7 +35,7 @@ environment:
   min_reward: 1e-6
 
 metrics:
-  num_traj: 512
+  num_traj: 2048
   batch_size : 16
 
 logging:

@@ -188,7 +188,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         # Replace the target with the log_gfn_reward if the episode is done
         target = jnp.where(
             transitions.done,
-            transitions.log_gfn_reward,
+            bwd_logprobs + transitions.log_gfn_reward,
             bwd_logprobs + next_log_flow,
         )
 
