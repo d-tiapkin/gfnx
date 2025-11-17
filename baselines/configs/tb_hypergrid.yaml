@@ -1,0 +1,40 @@
+seed: 111
+env_init_seed: 1
+eval_init_seed: 2
+
+num_train_steps: 62500
+num_envs: 16
+
+agent:
+  learning_rate: 1e-3
+  logZ_learning_rate: 0.1 # New field
+  eps_exploration: 0.00
+  train_backward: true
+
+network:
+  # Input size and output size are computed based on the environment
+  hidden_size: 256
+  depth: 2
+
+environment:
+  reward: "easy"
+  dim: 4
+  side: 20
+
+logging:
+  track_each: 500 # in terms of total training steps, not divited by num_envs
+  metric_buffer_size: 200000
+  tqdm_print_rate: 20
+  use_wandb: false
+
+# Technical information for wandb
+wandb:
+  entity: gfn-sampling
+  project: mctx
+
+# Technical information for hydra
+hydra:
+  run:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}
