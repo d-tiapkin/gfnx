@@ -23,7 +23,7 @@ dependencies = [
 ]
 authors = [
   { name="Daniil Tiapkin" },
-  { name="Arten Agarkov" },
+  { name="Artem Agarkov" },
   { name="Nikita Morozov" },
   { name="Ian Maksimov" },
   { name="Askar Tsyganov" },
