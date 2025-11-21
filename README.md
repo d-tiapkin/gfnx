@@ -1,5 +1,16 @@
 # gfnx: Generative Flow Networks in jaX
 
+<p align="center">
+       <a href="https://www.python.org/doc/versions/">
+        <img src="https://img.shields.io/badge/python->=3.10-blue" /></a>
+       <a href="https://pypi.org/project/gfnx/">
+        <img src="https://img.shields.io/badge/pypi_package-0.0.1-brightgreen" /></a>
+       <a href="https://arxiv.org/abs/2511.16592">
+        <img src="https://img.shields.io/badge/arXiv-2511.16592-b31b1b" /></a>
+       <a href="https://gfnx.readthedocs.io/en/latest/">
+        <img src="https://img.shields.io/badge/docs-green" /></a>
+</p>
+
 `gfnx` is a JAX-native toolkit for building and studying Generative Flow Networks (GFlowNets). It brings together a collection of benchmark environments and reproducible baselines so you can iterate quickly on new ideas.
 
 ## Highlights
@@ -63,3 +74,14 @@ The script is powered by Hydra, so you can override any configuration value on t
 - [torchgfn](https://torchgfn.readthedocs.io/en/latest/) – PyTorch-first GFlowNet library that shaped our environment design.
 - [CleanRL](https://github.com/vwxyzjn/cleanrl) – taught us the value of single-file baselines and reproducible experiment configs.
 - [purejaxrl](https://github.com/luchris429/purejaxrl/tree/main) and [JaxMARL](https://github.com/FLAIROx/JaxMARL/tree/main/jaxmarl) – reference points for idiomatic, accelerator-ready JAX reinforcement learning code.
+
+## Citation
+
+```
+@article{tiapkin2025gfnx,
+  title={gfnx: Fast and Scalable Library for Generative Flow Networks in JAX},
+  author={Tiapkin, Daniil and Agarkov, Artem and Morozov, Nikita and Maksimov, Ian and Tsyganov, Askar and Gritsaev, Timofei and Samsonov, Sergey},
+  journal={arXiv preprint arXiv:2511.16592},
+  year={2025}
+}
+```
