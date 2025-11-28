@@ -1,4 +1,4 @@
-# gfnx: Generative Flow Networks in jaX
+# gfnx: Fast and Scalable Generative Flow Networks in jaX
 
 <p align="center">
        <a href="https://www.python.org/doc/versions/">
