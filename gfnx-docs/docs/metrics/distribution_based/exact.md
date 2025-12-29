@@ -12,7 +12,7 @@ and the policy propagates through it to recover the exact terminal distribution 
 
 ## Key parameters
 
-- `metrics`: List of metric names to compute, choose from `{"tv", "kl", "2d_marginal_distribution"}`.
+- `metrics`: List of metric names to compute, choose from `{"tv", "kl", "jsd","2d_marginal_distribution"}`.
 - `env`: Enumerable environment for which to compute metrics.
 - `fwd_policy_fn`: Forward policy function for generating trajectories.
 - `batch_size`: Batch size used when evaluating policy over states.

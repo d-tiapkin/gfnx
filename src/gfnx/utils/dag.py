@@ -25,6 +25,26 @@ def uint8bits_to_int32(bits: chex.Array) -> chex.Array:
     return jnp.sum(bits * 256**powers)
 
 
+def get_all_adjacencies_flat_bits(num_variables: int) -> chex.Array:
+    """Compute sorted packed bit representations of all DAGs."""
+    # Construct all possible adjacency matrices. Shape: (num_graphs, N, N)
+    all_adjacencies = construct_all_dags(num_variables)
+    # Reshape the adjacency matrices to a flat array
+    all_adjacencies_flat = all_adjacencies.reshape(-1, num_variables**2)
+    # Pack the bits of the adjacency matrices
+    all_adjacencies_flat_bits = jnp.packbits(all_adjacencies_flat, axis=1)
+    all_adjacencies_flat_bits = jax.vmap(uint8bits_to_int32)(all_adjacencies_flat_bits)
+    return jnp.sort(all_adjacencies_flat_bits)
+
+
+def adj_to_index(adj: chex.Array, all_adjacencies_flat_bits: chex.Array) -> chex.Array:
+    """Convert adjacency matrix to state index given precomputed bit representations."""
+    adj_flat = adj.reshape(-1)
+    adj_bits = jnp.packbits(adj_flat)
+    adj_bits = uint8bits_to_int32(adj_bits)
+    return jnp.searchsorted(all_adjacencies_flat_bits, adj_bits)
+
+
 # TODO: (agarkovv) Make jit compatible
 def construct_all_dags(num_variables):
     """

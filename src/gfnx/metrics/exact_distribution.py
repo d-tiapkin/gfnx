@@ -5,7 +5,7 @@ import jax
 import jax.experimental.sparse as jsp
 import jax.numpy as jnp
 
-from gfnx.utils.distances import kl_divergence, total_variation_distance
+from gfnx.utils.distances import jensen_shannon_divergence, kl_divergence, total_variation_distance
 from gfnx.utils.rollout import TPolicyFn
 
 from ..base import TEnvironment, TEnvParams, TEnvState
@@ -66,10 +66,12 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
     Supported metrics:
         - "tv": Total variation distance between distributions
         - "kl": KL divergence between true and exact terminal distributions
+        - "jsd": Jensen-Shannon divergence between true and exact terminal distributions
         - "2d_marginal_distribution": Marginal distribution computation
 
     Attributes:
-        metrics: List of required metrics, choose from {"tv", "kl", "2d_marginal_distribution"}
+        metrics: List of required metrics, choose from {"tv", "kl", "jsd",
+            "2d_marginal_distribution"}
         env: Enumerable environment for which to compute metrics
         fwd_policy_fn: Forward policy function producing action logits
         batch_size: Batch size used when evaluating policy over states
@@ -80,6 +82,7 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
     _supported_metrics = {
         "tv": total_variation_distance,
         "kl": kl_divergence,
+        "jsd": jensen_shannon_divergence,
         "2d_marginal_distribution": marginal_distribution,
     }
 
@@ -98,11 +101,12 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
         for memory efficiency; it is unrelated to any replay buffer.
 
         Args:
-            metrics: List of metric names to compute, 
-                choose from {"tv", "kl", "2d_marginal_distribution"}.
+            metrics: List of metric names to compute,
+                choose from {"tv", "kl", "jsd", "2d_marginal_distribution"}.
             env: Enumerable environment for which to compute metrics.
             fwd_policy_fn: Forward policy function for generating trajectories.
             batch_size: Batch size used when evaluating policy over states.
+            tol_epsilon: Tolerance for convergence in distribution computation.
 
         Raises:
             ValueError: If the environment is not enumerable or not topologically sortable,
