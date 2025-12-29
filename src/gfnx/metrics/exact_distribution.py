@@ -70,7 +70,8 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
         - "2d_marginal_distribution": Marginal distribution computation
 
     Attributes:
-        metrics: List of required metrics, choose from {"tv", "kl", "jsd", "2d_marginal_distribution"}
+        metrics: List of required metrics, choose from {"tv", "kl", "jsd",
+            "2d_marginal_distribution"}
         env: Enumerable environment for which to compute metrics
         fwd_policy_fn: Forward policy function producing action logits
         batch_size: Batch size used when evaluating policy over states
