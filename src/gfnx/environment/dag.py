@@ -16,7 +16,7 @@ from gfnx.base import (
 )
 
 from .. import spaces
-from ..utils.dag import construct_all_dags, uint8bits_to_int32
+from ..utils.dag import adj_to_index, construct_all_dags, get_all_adjacencies_flat_bits
 
 
 @chex.dataclass(frozen=True)
@@ -45,24 +45,10 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         self.stop_action = self.num_variables * self.num_variables
 
         if self.is_enumerable:
-            # Construct all possible adjacency matrices. Shape: (num_graphs, N, N)
-            all_adjacencies = construct_all_dags(self.num_variables)
-            # Get the number of all possible DAGs
-            self.all_dags_num = all_adjacencies.shape[0]
-            # Reshape the adjacency matrices to a flat array
-            all_adjacencies_flat = all_adjacencies.reshape(-1, self.num_variables**2)
-            # Pack the bits of the adjacency matrices
-            all_adjacencies_flat_bits = jnp.packbits(all_adjacencies_flat, axis=1)
-            all_adjacencies_flat_bits = jax.vmap(uint8bits_to_int32)(all_adjacencies_flat_bits)
-            self.all_adjacencies_flat_bits = jnp.sort(all_adjacencies_flat_bits)
-
-            def _adj2id(adj: chex.Array) -> chex.Array:
-                adj_flat = adj.reshape(-1)
-                adj_bits = jnp.packbits(adj_flat)
-                adj_bits = uint8bits_to_int32(adj_bits)
-                return jnp.searchsorted(self.all_adjacencies_flat_bits, adj_bits)
-
-            self._adj2id = _adj2id
+            # Here we construct a helper array to convert an adjacency matrix to an index.
+            # This is done during initialization to avoid repetitive computations.
+            self.all_adjacencies_flat_bits = get_all_adjacencies_flat_bits(self.num_variables)
+            self.all_dags_num = self.all_adjacencies_flat_bits.shape[0]
 
     def get_init_state(self, num_envs: int) -> EnvState:
         return EnvState(
@@ -311,23 +297,33 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         """Whether this environment supports enumerable operations."""
         return self.num_variables < 6
 
+    def state_to_index(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        return adj_to_index(state.adjacency_matrix, self.all_adjacencies_flat_bits)
+
+    def get_all_states(self, env_params: EnvParams) -> EnvState:
+        """Returns all states in the environment in some order."""
+        all_adjacency_matrices = construct_all_dags(self.num_variables)
+        sort_idx = jax.vmap(adj_to_index, in_axes=(0, None))(
+            all_adjacency_matrices, self.all_adjacencies_flat_bits
+        )
+        all_adjacency_matrices = all_adjacency_matrices[sort_idx]
+        all_states = jax.vmap(
+            lambda x: EnvState(
+                adjacency_matrix=x,
+                closure_T=self._single_compute_closure(x.T),
+                is_terminal=False,
+                is_initial=False,
+                is_pad=False,
+            )
+        )(all_adjacency_matrices)
+        return all_states
+
     def _get_states_rewards(self, env_params: EnvParams) -> chex.Array:
         """
         Returns the true distribution of rewards for all states in the DAG environment.
         NOTE: The rewards are shifted since log rewards are ~-100.
         """
-        all_adjacency_matrices = construct_all_dags(self.num_variables)
-        sort_idx = jax.vmap(self._adj2id)(all_adjacency_matrices)
-        all_adjacency_matrices = all_adjacency_matrices[sort_idx]
-        all_dags = jax.vmap(
-            lambda x: EnvState(
-                adjacency_matrix=x,
-                closure_T=self._single_compute_closure(x),
-                is_terminal=True,
-                is_initial=False,
-                is_pad=False,
-            )
-        )(all_adjacency_matrices)
+        all_dags = self.get_all_states(env_params)
         log_reward = self.reward_module.log_reward(all_dags, env_params)
         log_reward = log_reward - jnp.max(log_reward)  # softmax trick
         reward = jnp.exp(log_reward)
@@ -344,7 +340,9 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         """
         Extracts the empirical distribution from the given states.
         """
-        sample_idx = jax.vmap(self._adj2id)(states.adjacency_matrix)
+        sample_idx = jax.vmap(adj_to_index, in_axes=(0, None))(
+            states.adjacency_matrix, self.all_adjacencies_flat_bits
+        )
         valid_mask = states.is_terminal.astype(jnp.float32)
         empirical_dist = jax.ops.segment_sum(
             valid_mask, sample_idx, num_segments=self.all_dags_num

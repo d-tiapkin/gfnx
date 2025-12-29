@@ -29,7 +29,7 @@ from utils.logger import Writer
 
 import gfnx
 from gfnx.metrics import (
-    ApproxDistributionMetricsModule,
+    ExactDistributionMetricsModule,
     MultiMetricsModule,
     MultiMetricsState,
     TestCorrelationMetricsModule,
@@ -340,9 +340,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         train_state.env_params,
     )
     # Compute the RL reward / ELBO (for logging purposes)
-    _, log_pb_traj = gfnx.utils.forward_trajectory_log_probs(
-        env, traj_data, env_params
-    )
+    _, log_pb_traj = gfnx.utils.forward_trajectory_log_probs(env, traj_data, env_params)
     rl_reward = log_pb_traj + log_info["log_gfn_reward"] + log_info["entropy"]
 
     # Step 2. Compute the loss
@@ -413,19 +411,6 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     metrics_state = train_state.metrics_state
     metrics_module = train_state.metrics_module
 
-    # Peform all the requied updates of metrics
-    metrics_state = metrics_module.update(
-        metrics_state=metrics_state,
-        rng_key=jax.random.key(0),  # not used, but required by the API
-        args=metrics_module.UpdateArgs(
-            metrics_args={
-                "distribution": ApproxDistributionMetricsModule.UpdateArgs(
-                    states=log_info["final_env_state"]
-                ),
-            }
-        ),
-    )
-
     rng_key, eval_rng_key = jax.random.split(rng_key)
     # Perform evaluation computations if needed
     is_eval_step = idx % train_state.config.logging.track_each == 0
@@ -440,23 +425,24 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             "rng_key": eval_rng_key,
             "args": metrics_module.ProcessArgs(
                 metrics_args={
-                    "distribution": ApproxDistributionMetricsModule.ProcessArgs(
+                    "exact_distribution": ExactDistributionMetricsModule.ProcessArgs(
+                        policy_params=model_params,
                         env_params=train_state.env_params,
                     ),
                     "reward_corr": TestCorrelationMetricsModule.ProcessArgs(
-                        policy_params=policy_params,
+                        policy_params=model_params,
                         env_params=train_state.env_params,
                     ),
                     "edge_corr": TestCorrelationMetricsModule.ProcessArgs(
-                        policy_params=policy_params,
+                        policy_params=model_params,
                         env_params=train_state.env_params,
                     ),
                     "path_corr": TestCorrelationMetricsModule.ProcessArgs(
-                        policy_params=policy_params,
+                        policy_params=model_params,
                         env_params=train_state.env_params,
                     ),
                     "markov_blanket_corr": TestCorrelationMetricsModule.ProcessArgs(
-                        policy_params=policy_params,
+                        policy_params=model_params,
                         env_params=train_state.env_params,
                     ),
                 }
@@ -486,7 +472,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         {
             "mean_loss": mean_loss,
             "entropy": log_info["entropy"].mean(),
-            "grad_norm": optax.tree_utils.tree_norm(grads, ord=2),
+            "grad_norm": optax.tree_utils.tree_l2_norm(grads),
             "mean_reward": jnp.exp(log_info["log_gfn_reward"]).mean(),
             "mean_log_reward": log_info["log_gfn_reward"].mean(),
             "rl_reward": rl_reward.mean(),
@@ -586,7 +572,17 @@ def run_experiment(cfg: OmegaConf) -> None:
     # Initialize the backward policy function for correlation computation
     policy_static = eqx.filter(model, eqx.is_array, inverse=True)
 
-    def bwd_policy_fn(rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params) -> chex.Array:
+    def fwd_policy_fn(
+        rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
+    ) -> tuple[chex.Array, dict[str, chex.Array]]:
+        del rng_key
+        policy = eqx.combine(policy_params, policy_static)
+        policy_outputs = policy(env_obs)
+        return policy_outputs["forward_logits"], policy_outputs
+
+    def bwd_policy_fn(
+        rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
+    ) -> tuple[chex.Array, dict[str, chex.Array]]:
         del rng_key
         policy = eqx.combine(policy_params, policy_static)
         policy_outputs = policy(env_obs)
@@ -624,10 +620,11 @@ def run_experiment(cfg: OmegaConf) -> None:
         return markov_blanket_log_score.reshape(-1)
 
     metrics_module = MultiMetricsModule({
-        "distribution": ApproxDistributionMetricsModule(
+        "exact_distribution": ExactDistributionMetricsModule(
             metrics=["tv", "kl", "jsd"],
             env=env,
-            buffer_size=cfg.logging.metric_buffer_size,
+            fwd_policy_fn=fwd_policy_fn,
+            batch_size=cfg.metrics.batch_size,
         ),
         "reward_corr": TestCorrelationMetricsModule(
             env=env,
@@ -676,7 +673,9 @@ def run_experiment(cfg: OmegaConf) -> None:
         eval_init_key,
         metrics_module.InitArgs(
             metrics_args={
-                "distribution": ApproxDistributionMetricsModule.InitArgs(env_params=env_params),
+                "exact_distribution": ExactDistributionMetricsModule.InitArgs(
+                    env_params=env_params
+                ),
                 "reward_corr": TestCorrelationMetricsModule.InitArgs(
                     env_params=env_params,
                     test_set=test_set_states,
