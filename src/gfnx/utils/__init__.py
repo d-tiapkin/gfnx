@@ -22,6 +22,7 @@ from .proteins import (
     PROTEINS_FULL_ALPHABET,
     SPECIAL_TOKENS,
 )
+from .replay_buffer import ReplayBuffer, ReplayBufferState, make_replay_buffer
 from .rollout import (
     TrajectoryData,
     TransitionData,
@@ -41,6 +42,8 @@ __all__ = [
     "QM9_SMALL_FULL_ALPHABET",
     "SPECIAL_TOKENS",
     "ExplorationState",
+    "ReplayBuffer",
+    "ReplayBufferState",
     "TrajectoryData",
     "TransitionData",
     "apply_epsilon_greedy",
@@ -54,9 +57,12 @@ __all__ = [
     "forward_trajectory_log_probs",
     "get_phylo_initialization_args",
     "get_true_ising_J",
+    "get_true_ising_J",
     "jensen_shannon_divergence",
     "kl_divergence",
+    "make_replay_buffer",
     "mask_logits",
+    "pt_sampler",
     "pt_sampler",
     "split_traj_to_transitions",
     "total_variation_distance",
