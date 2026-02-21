@@ -24,12 +24,11 @@ import numpy as np
 import optax
 from jax_tqdm import loop_tqdm
 from omegaconf import OmegaConf
+from utils.checkpoint import save_checkpoint
+from utils.logger import Writer
 
 import gfnx
 from gfnx.metrics import ApproxDistributionMetricsModule, ApproxDistributionMetricsState
-
-from utils.logger import Writer
-from utils.checkpoint import save_checkpoint
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -217,8 +216,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         local_losses = jnp.where(
             transitions.done, local_losses * train_state.config.agent.leaf_coeff, local_losses
         )
-        local_losses = jnp.sum(local_losses * not_pad_mask) / jnp.sum(not_pad_mask)
-        return local_losses
+        return jnp.sum(local_losses * not_pad_mask) / jnp.sum(not_pad_mask)
 
     mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(train_state.model,
                                                           train_state.target_model)
@@ -237,7 +235,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
 
     is_target_update = idx % train_state.config.agent.target_update_every == 0
     trgt_model_params, trgt_model_static = eqx.partition(train_state.target_model, eqx.is_array)
-    model_params, model_static = eqx.partition(new_model, eqx.is_array)
+    model_params, _model_static = eqx.partition(new_model, eqx.is_array)
 
     new_trgt_model_params = jax.lax.cond(
         is_target_update,

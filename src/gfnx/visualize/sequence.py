@@ -1,12 +1,13 @@
+from typing import ClassVar
+
 import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
 import numpy as np
-from typing import Tuple, List
+from matplotlib import patches
 
 from ..base import BaseRenderer, TAction
-from ..environment.sequence import SequenceEnvironment, EnvState, EnvParams
+from ..environment.sequence import EnvParams, EnvState, SequenceEnvironment
 
 
 class SequenceRenderer(BaseRenderer[EnvState]):
@@ -14,7 +15,7 @@ class SequenceRenderer(BaseRenderer[EnvState]):
     CELL_WIDTH = 32 / 100
     BORDER_WIDTH = 1 / 100
 
-    TOKEN_PATTERNS = {
+    TOKEN_PATTERNS: ClassVar[dict[str, np.ndarray]] = {
         "char": np.array([
             [1, 1, 1, 1, 1, 1, 1, 1],
             [1, 1, 1, 1, 1, 1, 1, 1],
@@ -61,7 +62,7 @@ class SequenceRenderer(BaseRenderer[EnvState]):
         self.fig: matplotlib.figure.Figure | None = None
         self.ax: matplotlib.axes.Axes | None = None
         self.dpi = dpi
-        self.token_artists: List[matplotlib.artist.Artist] = []
+        self.token_artists: list[matplotlib.artist.Artist] = []
 
         self.colors = matplotlib.colormaps[color_map](np.linspace(0, 1, env_params.ntoken))
 
@@ -118,8 +119,8 @@ class SequenceRenderer(BaseRenderer[EnvState]):
         return self.fig
 
     def _render_pattern(
-        self, pattern: np.ndarray, color: np.ndarray, position: Tuple[int, int]
-    ) -> List[matplotlib.artist.Artist]:
+        self, pattern: np.ndarray, color: np.ndarray, position: tuple[int, int]
+    ) -> list[matplotlib.artist.Artist]:
         """Render a single pattern at the specified position."""
         x = position[0] * self.CELL_WIDTH + self.BORDER_WIDTH
         y = position[1] * self.CELL_WIDTH + self.BORDER_WIDTH
@@ -164,7 +165,7 @@ class SequenceRenderer(BaseRenderer[EnvState]):
 
         return self.TOKEN_PATTERNS["char"]
 
-    def _remove_token_artists(self, artists: List[matplotlib.artist.Artist]):
+    def _remove_token_artists(self, artists: list[matplotlib.artist.Artist]):
         """Remove matplotlib artists from the plot."""
         for artist in artists:
             artist.remove()

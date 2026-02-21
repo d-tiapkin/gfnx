@@ -1,5 +1,4 @@
 import math
-from typing import Optional
 
 import chex
 import jax.numpy as jnp
@@ -66,7 +65,7 @@ class BaseDAGLikelihood:
         - TLogReward, shape [B], batch of delta-scores
         """
         arange = jnp.arange(state.is_pad.shape[0])  # [B]
-        source, target = jnp.divmod(action, env_params.num_variables)
+        _source, target = jnp.divmod(action, env_params.num_variables)
         parents = state.adjacency_matrix[arange, :, target]  # [B, num_variables]
         next_parents = next_state.adjacency_matrix[arange, :, target]  # [B, num_variables]
         likelihood_params = env_params.reward_params.likelihood_params
@@ -173,9 +172,9 @@ class BGeScore(BaseDAGLikelihood):
     def __init__(
         self,
         data: chex.Array,
-        mean_obs: Optional[chex.Array] = None,
+        mean_obs: chex.Array | None = None,
         alpha_mu: float = 1.0,
-        alpha_w: Optional[float] = None,
+        alpha_w: float | None = None,
     ):
         self.num_samples, self.num_variables = data.shape
         if mean_obs is None:

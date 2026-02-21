@@ -62,8 +62,7 @@ def _make_alpha_ladder(
         return jnp.array([alpha_target], dtype=jnp.float32)
     t = jnp.linspace(0.0, 1.0, num_replicas, dtype=jnp.float32)
     ladder = alpha_min * jnp.power(alpha_target / alpha_min, t)
-    ladder = ladder.at[-1].set(alpha_target)  # exact target at the top
-    return ladder
+    return ladder.at[-1].set(alpha_target)  # exact target at the top
 
 
 def _heat_bath_checkerboard(

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import chex
 import jax
@@ -118,7 +118,7 @@ class PhyloTreeEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
 
     def _single_transition(
         self, state: EnvState, action: TAction, env_params: EnvParams
-    ) -> Tuple[EnvState, TDone, Dict[str, Any]]:
+    ) -> tuple[EnvState, TDone, dict[str, Any]]:
         """Single environment step transition"""
         is_terminal = state.is_terminal
 
@@ -162,7 +162,7 @@ class PhyloTreeEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
 
     def _single_backward_transition(
         self, state: EnvState, backward_action: TAction, env_params: EnvParams
-    ) -> Tuple[EnvState, chex.Array, Dict[str, Any]]:
+    ) -> tuple[EnvState, chex.Array, dict[str, Any]]:
         """Single environment step backward transition"""
         is_initial = state.is_initial
 
@@ -343,18 +343,16 @@ class PhyloTreeEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             batch_idx,
             state.right_child[batch_idx, state.to_root[batch_idx, backward_action]],
         ]
-        forward_action = (
+        return (
             left * (2 * self.num_nodes - 1 - left) // 2 + right - (left + 1)
         )  # Reverse operation of lefts[forward_action] and rights[forward_action]
 
-        return forward_action
 
     def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
         """Returns mask of invalid actions"""
 
         def single_get_invalid_mask(state: EnvState) -> chex.Array:
-            mask = (state.to_root == -1)[self.lefts] | (state.to_root == -1)[self.rights]
-            return mask
+            return (state.to_root == -1)[self.lefts] | (state.to_root == -1)[self.rights]
 
         return jax.vmap(single_get_invalid_mask)(state)
 

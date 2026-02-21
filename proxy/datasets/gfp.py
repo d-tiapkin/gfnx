@@ -17,7 +17,6 @@ IMPORTANT: Go through the SmilesTokenizer in deepchem and:
     self.init_kwargs["model_max_length"] = self.model_max_length
 """
 
-from typing import Tuple
 
 import chex
 import jax.numpy as jnp
@@ -55,10 +54,10 @@ class GFPRewardProxyDataset(RewardProxyDataset):
         )
         self.test_data, self.test_score = jnp.array(x_test), jnp.array(y_test)
 
-    def train_set(self) -> Tuple[chex.Array, chex.Array]:
+    def train_set(self) -> tuple[chex.Array, chex.Array]:
         return self.train_data, self.train_score
 
-    def test_set(self) -> Tuple[chex.Array, chex.Array]:
+    def test_set(self) -> tuple[chex.Array, chex.Array]:
         return self.test_data, self.test_score
 
     @property

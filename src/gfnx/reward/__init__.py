@@ -15,19 +15,19 @@ from .qm9_small import QM9SmallRewardModule
 from .tfbind import TFBind8RewardModule
 
 __all__ = [
+    "BGeScore",
     "BitseqRewardModule",
+    "DAGRewardModule",
     "EasyHypergridRewardModule",
     "EqxProxyAMPRewardModule",
     "EqxProxyGFPRewardModule",
     "GeneralHypergridRewardModule",
     "HardHypergridRewardModule",
-    "PhyloTreeRewardModule",
-    "TFBind8RewardModule",
-    "QM9SmallRewardModule",
-    "DAGRewardModule",
-    "ZeroScore",
-    "LinearGaussianScore",
-    "BGeScore",
-    "UniformDAGPrior",
     "IsingRewardModule",
+    "LinearGaussianScore",
+    "PhyloTreeRewardModule",
+    "QM9SmallRewardModule",
+    "TFBind8RewardModule",
+    "UniformDAGPrior",
+    "ZeroScore",
 ]

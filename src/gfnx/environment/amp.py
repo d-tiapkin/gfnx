@@ -1,12 +1,13 @@
+import chex
+import jax.numpy as jnp
+
 from ..base import TRewardModule
 from ..utils import AMINO_ACIDS, PROTEINS_FULL_ALPHABET
 from .sequence import (
-    EnvParams,  # noqa: F401
-    EnvState,  # noqa: F401
     AutoregressiveSequenceEnvironment,
+    EnvParams,
+    EnvState,
 )
-import jax.numpy as jnp
-import chex
 
 
 class AMPEnvironment(AutoregressiveSequenceEnvironment):
@@ -40,11 +41,10 @@ class AMPEnvironment(AutoregressiveSequenceEnvironment):
         )
         to_append = to_append[:, None]  # Add dimension to match concatenation
 
-        obs = jnp.concat(
+        return jnp.concat(
             [
                 state.tokens,
                 to_append,
             ],
             axis=-1,
         )
-        return obs

@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import ClassVar
 
 import chex
 
@@ -8,12 +8,14 @@ from gfnx.utils import PROTEINS_FULL_ALPHABET
 class RewardProxyDataset:
     """Base class for reward proxy datasets for protein design tasks."""
 
-    char_to_id = {char: i for i, char in enumerate(PROTEINS_FULL_ALPHABET)}
+    char_to_id: ClassVar[dict[str, int]] = {
+        char: i for i, char in enumerate(PROTEINS_FULL_ALPHABET)
+    }
 
-    def train_set(self) -> Tuple[chex.Array, chex.Array]:
+    def train_set(self) -> tuple[chex.Array, chex.Array]:
         raise NotImplementedError
 
-    def test_set(self) -> Tuple[chex.Array, chex.Array]:
+    def test_set(self) -> tuple[chex.Array, chex.Array]:
         raise NotImplementedError
 
     @property

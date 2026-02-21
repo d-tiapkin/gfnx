@@ -1,4 +1,5 @@
-from typing import Callable, Literal
+from collections.abc import Callable
+from typing import Literal
 
 import chex
 import jax
@@ -73,7 +74,7 @@ def apply_epsilon_greedy(
     Returns:
         Modified logits with exploration
     """
-    random_key, choice_key = jax.random.split(rng_key)
+    _random_key, choice_key = jax.random.split(rng_key)
     default_logits = jnp.zeros_like(logits)
     # Choose between random and policy logits
     explore = jax.random.uniform(choice_key) < epsilon

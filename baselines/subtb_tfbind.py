@@ -24,6 +24,8 @@ import optax
 from jax_tqdm import loop_tqdm
 from jaxtyping import Array, Int
 from omegaconf import OmegaConf
+from utils.checkpoint import save_checkpoint
+from utils.logger import Writer
 
 import gfnx
 from gfnx.metrics import (
@@ -32,9 +34,6 @@ from gfnx.metrics import (
     MultiMetricsState,
     SWMeanRewardSWMetricsModule,
 )
-
-from utils.logger import Writer
-from utils.checkpoint import save_checkpoint
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -191,7 +190,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         bwd_logits_traj = policy_outputs_traj["backward_logits"]
         log_flow_traj = policy_outputs_traj["log_flow"].squeeze(-1)
 
-        batch_size, traj_len_plus1 = current_traj_data.action.shape
+        _batch_size, traj_len_plus1 = current_traj_data.action.shape
         traj_len = traj_len_plus1 - 1
 
         # Masks
@@ -256,14 +255,13 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             )(i, j, log_pf, log_pb, log_flow, done, pad)
             return weighted_loss.sum() / weighted_norm.sum()
 
-        loss = jax.vmap(process_one_traj)(
+        return jax.vmap(process_one_traj)(
             log_pf_along_traj,
             log_pb_along_traj,
             log_flow_traj,
             done_mask,
             pad_mask,
         ).mean()
-        return loss
 
     # Prepare parameters for the loss function and gradient calculation
     params_for_loss = {"model_params": policy_params}

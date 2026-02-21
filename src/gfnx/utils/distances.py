@@ -126,7 +126,8 @@ def _levenshtein_core_padded(
             current_val_minus_1, prev_row_diag = carry
 
             # s2_packed_j_tuple = (s2_char, prev_row_j, j)
-            s2_char, prev_row_j, j = s2_packed_j_tuple  # j is effective col index (0 to max_len-1)
+            s2_char, prev_row_j, _j = s2_packed_j_tuple
+            # j is effective col index (0 to max_len-1)
             # s2_char is s2_padded[j]
             # prev_row_j is dp[i, j+1]
 
@@ -181,7 +182,7 @@ def _levenshtein_core_padded(
     # Execute the outer scan
     # final_row is dp[max_len, :]
     # all_rows contains dp[1, :], dp[2, :], ..., dp[max_len, :]
-    final_row, all_rows = jax.lax.scan(
+    _final_row, all_rows = jax.lax.scan(
         compute_row,
         initial_row,  # Initial carry is dp[0, :]
         outer_scan_inputs,  # Iterate through padded s1 and indices

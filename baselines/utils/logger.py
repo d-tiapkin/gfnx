@@ -1,12 +1,13 @@
-import os
 import json
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-import numpy as np
 import jax.numpy as jnp
+import numpy as np
 from PIL.Image import Image as PILImage
-from PIL.Image import fromarray as pil_fromarray, open as pil_open
+from PIL.Image import fromarray as pil_fromarray
+from PIL.Image import open as pil_open
 
 
 class BaseLoggerWrapper(ABC):
@@ -238,6 +239,6 @@ class Writer:
         elif isinstance(data_or_path, PILImage):
             image = data_or_path
         else:
-            raise ValueError("Unsupported image data type.")
+            raise TypeError("Unsupported image data type.")
 
         return image

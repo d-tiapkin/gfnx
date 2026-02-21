@@ -1,3 +1,4 @@
+# ruff: noqa: RUF022
 from .approx_distribution import ApproxDistributionMetricsModule, ApproxDistributionMetricsState
 from .base import (
     BaseInitArgs,

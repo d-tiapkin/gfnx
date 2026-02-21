@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any
 
 import chex
 import flashbax as fbx
@@ -137,7 +137,7 @@ class MeanRewardMetricsModule(BaseMetricsModule):
         """
         return metrics_state
 
-    def get(self, metrics_state: MeanRewardMetricsState) -> Dict[str, float]:
+    def get(self, metrics_state: MeanRewardMetricsState) -> dict[str, float]:
         """Get the computed mean reward metrics from the current state.
 
         Computes the empirical mean reward from accumulated samples and calculates
@@ -294,7 +294,7 @@ class SWMeanRewardSWMetricsModule(BaseMetricsModule):
         """
         return metrics_state
 
-    def get(self, metrics_state: SWMeanRewardMetricsState) -> Dict[str, float]:
+    def get(self, metrics_state: SWMeanRewardMetricsState) -> dict[str, float]:
         """Get the computed sliding window mean reward metrics from the current state.
 
         Computes the mean reward from samples in the sliding window buffer and calculates

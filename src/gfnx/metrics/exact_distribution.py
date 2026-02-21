@@ -1,4 +1,5 @@
-from typing import Any, Dict
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 import chex
 import jax
@@ -79,7 +80,7 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
         _supported_metrics: Dictionary mapping metric names to computation functions
     """
 
-    _supported_metrics = {
+    _supported_metrics: ClassVar[dict[str, Callable[..., chex.Array]]] = {
         "tv": total_variation_distance,
         "kl": kl_divergence,
         "jsd": jensen_shannon_divergence,
@@ -116,7 +117,7 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
             raise ValueError(f"Environment {env.name} is not enumerable")
         if not isinstance(metrics, list) or not all(isinstance(m, str) for m in metrics):
             raise ValueError("metrics must be a list of strings")
-        if not all(m in self._supported_metrics.keys() for m in metrics):
+        if not all(m in self._supported_metrics for m in metrics):
             raise ValueError(
                 f"Unsupported metrics. Supported metrics are: \
                     {self._supported_metrics}"
@@ -314,7 +315,7 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
         )
         return jsp.BCSR.from_bcoo(transition_matrix.T)
 
-    def get(self, metrics_state: ExactDistributionMetricsState) -> Dict[str, Any]:
+    def get(self, metrics_state: ExactDistributionMetricsState) -> dict[str, Any]:
         return {
             metric: self._supported_metrics[metric](
                 metrics_state.true_distribution, metrics_state.exact_distribution

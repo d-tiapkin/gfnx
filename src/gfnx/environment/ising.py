@@ -1,4 +1,4 @@
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import chex
 import jax
@@ -73,7 +73,7 @@ class IsingEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
-    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
         """
         Environment-specific step forward transition.
         """
@@ -104,7 +104,7 @@ class IsingEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         state: EnvState,
         backward_action: chex.Array,
         env_params: EnvParams,
-    ) -> Tuple[chex.Array, EnvState, chex.Array, chex.Array, Dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, chex.Array, chex.Array, dict[Any, Any]]:
         """
         Environment-specific step backward transition. Rewards always zero!
         """
@@ -170,8 +170,7 @@ class IsingEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
 
         An action is invalid if there is no spin at the index of the action.
         """
-        mask = state.state == -1
-        return mask
+        return state.state == -1
 
     @property
     def name(self) -> str:

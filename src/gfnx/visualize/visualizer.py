@@ -2,11 +2,11 @@ import jax
 import matplotlib
 from matplotlib.animation import FuncAnimation
 
-from gfnx.base import BaseVecEnvironment, BaseEnvParams, BaseEnvState
+from gfnx.base import BaseEnvParams, BaseEnvState, BaseVecEnvironment
 
-from .sequence import SequenceEnvironment, SequenceRenderer
-from .hypergrid import HypergridEnvironment, HypergridRenderer
 from ..utils import TrajectoryData, split_traj_to_transitions
+from .hypergrid import HypergridEnvironment, HypergridRenderer
+from .sequence import SequenceEnvironment, SequenceRenderer
 
 
 class Visualizer:
@@ -141,7 +141,7 @@ class Visualizer:
             jax.tree.map(lambda x: x[:, 0, ...], transitions.state)
         )  # Initial state
         for step in range(traj_len - 1):
-            transition = jax.tree.map(lambda x: x[:, step, ...], transitions)
+            transition = jax.tree.map(lambda x, s=step: x[:, s, ...], transitions)
             state, next_state, action = transition.state, transition.next_state, transition.action
             self.backend.transition(state, next_state, action)
 

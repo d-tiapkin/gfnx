@@ -1,4 +1,4 @@
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import chex
 import jax
@@ -82,7 +82,7 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
-    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
         is_terminal = state.is_terminal
 
         def get_state_terminal() -> EnvState:
@@ -127,7 +127,7 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         frontier_init = visited_init
 
         def cond_fun(carry):
-            frontier, visited = carry
+            frontier, _visited = carry
             return jnp.any(frontier)  # continue while we have newly discovered nodes
 
         def body_fun(carry):
@@ -151,15 +151,14 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         d = adjacency.shape[0]
         closure = jax.vmap(lambda i: self._single_source_bfs(adjacency, i))(jnp.arange(d))
         # Force the diagonal True (i can reach i by convention)
-        closure = jnp.logical_or(closure, jnp.eye(d, dtype=jnp.bool))
-        return closure
+        return jnp.logical_or(closure, jnp.eye(d, dtype=jnp.bool))
 
     def _single_backward_transition(
         self,
         state: EnvState,
         backward_action: chex.Array,
         env_params: EnvParams,
-    ) -> Tuple[chex.Array, EnvState, chex.Array, chex.Array, Dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, chex.Array, chex.Array, dict[Any, Any]]:
         """Backward transition for DAG environment.
         Removing an edge is equivalent to adding a 'phantom' edge.
         """
@@ -222,10 +221,9 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         """
         num_envs = state.is_pad.shape[0]
         mask = jnp.logical_or(state.adjacency_matrix, state.closure_T).reshape(num_envs, -1)
-        mask = jnp.concatenate(
+        return jnp.concatenate(
             [mask, jnp.zeros((num_envs, 1), dtype=jnp.bool)], axis=1
         )  # stop action == last action is always valid
-        return mask
 
     def get_invalid_backward_mask(self, state: EnvState, params: EnvParams) -> chex.Array:
         """Invalid mask for backward actions.
@@ -307,7 +305,7 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             all_adjacency_matrices, self.all_adjacencies_flat_bits
         )
         all_adjacency_matrices = all_adjacency_matrices[sort_idx]
-        all_states = jax.vmap(
+        return jax.vmap(
             lambda x: EnvState(
                 adjacency_matrix=x,
                 closure_T=self._single_compute_closure(x.T),
@@ -316,7 +314,6 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
                 is_pad=False,
             )
         )(all_adjacency_matrices)
-        return all_states
 
     def _get_states_rewards(self, env_params: EnvParams) -> chex.Array:
         """
@@ -326,8 +323,7 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         all_dags = self.get_all_states(env_params)
         log_reward = self.reward_module.log_reward(all_dags, env_params)
         log_reward = log_reward - jnp.max(log_reward)  # softmax trick
-        reward = jnp.exp(log_reward)
-        return reward
+        return jnp.exp(log_reward)
 
     def get_true_distribution(self, env_params: EnvParams) -> chex.Array:
         """

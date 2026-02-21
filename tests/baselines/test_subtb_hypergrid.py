@@ -47,13 +47,14 @@ def training_result(training_paths) -> TrainingResult:
             str(training_paths["script"]),
             "--config-path", str(training_paths["config_dir"].absolute()),
             "--config-name", "test_subtb_hypergrid",
-            f"hydra.run.dir={str(training_paths['output_base'].absolute())}",
-            f"hydra.sweep.dir={str(training_paths['output_base'].absolute())}",
+            f"hydra.run.dir={training_paths['output_base'].absolute()!s}",
+            f"hydra.sweep.dir={training_paths['output_base'].absolute()!s}",
         ],
         cwd=training_paths["baselines_dir"],  # Required for relative imports in script
         capture_output=True,
         text=True,
-        timeout=600  # 10 minute timeout
+        timeout=600,  # 10 minute timeout
+        check=False,
     )
     
     return TrainingResult(

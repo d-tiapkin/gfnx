@@ -1,6 +1,6 @@
 import inspect
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 import chex
 import jax
@@ -21,7 +21,6 @@ class MetricsState:
     needed for their metric computation requirements, but no methods.
     """
 
-    pass
 
 
 class BaseInitArgs(ABC):
@@ -30,7 +29,6 @@ class BaseInitArgs(ABC):
     of metric modules.
     """
 
-    pass
 
 
 class BaseUpdateArgs(ABC):
@@ -39,7 +37,6 @@ class BaseUpdateArgs(ABC):
     of metric modules.
     """
 
-    pass
 
 
 class BaseProcessArgs(ABC):
@@ -48,7 +45,6 @@ class BaseProcessArgs(ABC):
     of metric modules.
     """
 
-    pass
 
 
 # Some helper classes for empty arguments cases
@@ -58,21 +54,18 @@ class BaseProcessArgs(ABC):
 class EmptyInitArgs(BaseInitArgs):
     """Empty initialization arguments for metrics that do not require any parameters."""
 
-    pass
 
 
 @chex.dataclass
 class EmptyUpdateArgs(BaseUpdateArgs):
     """Empty update arguments for metrics that do not require any parameters."""
 
-    pass
 
 
 @chex.dataclass
 class EmptyProcessArgs(BaseProcessArgs):
     """Empty process arguments for metrics that do not require any parameters."""
 
-    pass
 
 
 TMetricsState = TypeVar("TMetricsState", bound=MetricsState)
@@ -196,7 +189,7 @@ class BaseMetricsModule(ABC, Generic[TInitArgs, TUpdateArgs, TProcessArgs, TMetr
         raise NotImplementedError
 
     @abstractmethod
-    def get(self, metrics_state: TMetricsState) -> Dict[str, Any]:
+    def get(self, metrics_state: TMetricsState) -> dict[str, Any]:
         """Get computed metrics from the current state.
 
         Computes and returns the final metrics based on the current state.
@@ -230,7 +223,7 @@ class MultiMetricsState(MetricsState):
                corresponding metric's state object.
     """
 
-    states: Dict[str, MetricsState]
+    states: dict[str, MetricsState]
 
 
 class MultiMetricsModule(BaseMetricsModule):
@@ -251,7 +244,7 @@ class MultiMetricsModule(BaseMetricsModule):
         _supported_metrics: Internal mapping of metric names to their get methods
     """
 
-    def __init__(self, metrics: Dict[str, BaseMetricsModule]):
+    def __init__(self, metrics: dict[str, BaseMetricsModule]):
         """Initialize the MultiMetricsModule with a collection of metrics.
 
         Args:
@@ -267,7 +260,7 @@ class MultiMetricsModule(BaseMetricsModule):
     class InitArgs(BaseInitArgs):
         """Arguments for initializing the MultiMetricsModule."""
 
-        metrics_args: Dict[str, BaseInitArgs]
+        metrics_args: dict[str, BaseInitArgs]
 
     def init(self, rng_key: chex.PRNGKey, args: InitArgs | None = None) -> MultiMetricsState:
         """Initialize all contained metrics.
@@ -296,7 +289,7 @@ class MultiMetricsModule(BaseMetricsModule):
     class UpdateArgs(BaseUpdateArgs):
         """Arguments for updating the MultiMetricsModule."""
 
-        metrics_args: Dict[str, Any]
+        metrics_args: dict[str, Any]
 
     def update(
         self,
@@ -336,7 +329,7 @@ class MultiMetricsModule(BaseMetricsModule):
     class ProcessArgs(BaseProcessArgs):
         """Arguments for processing the MultiMetricsModule."""
 
-        metrics_args: Dict[str, Any]
+        metrics_args: dict[str, Any]
 
     def process(
         self,
@@ -372,7 +365,7 @@ class MultiMetricsModule(BaseMetricsModule):
         }
         return metrics_state.replace(states=processed_states)
 
-    def get(self, metrics_state: MultiMetricsState) -> Dict[str, Any]:
+    def get(self, metrics_state: MultiMetricsState) -> dict[str, Any]:
         """Get computed metrics from all contained modules.
 
         Collects metrics from all metric modules and returns them with

@@ -20,8 +20,7 @@ def torus_adjacency(N: int, dtype=jnp.uint8) -> chex.Array:
     A = jnp.zeros((N * N, N * N), dtype=dtype)
     A = A.at[rows, cols].set(1)
 
-    A = A.at[jnp.arange(N * N), jnp.arange(N * N)].set(0)
-    return A
+    return A.at[jnp.arange(N * N), jnp.arange(N * N)].set(0)
 
 
 def get_true_ising_J(N: int, sigma: float) -> chex.Array:

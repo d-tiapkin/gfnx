@@ -1,7 +1,7 @@
 """Abstract base class for all gfnx Environments"""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, Tuple, TypeVar
+from typing import Any, Generic, TypeVar
 
 import chex
 import jax
@@ -118,7 +118,7 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
 
     def step(
         self, state: TEnvState, action: TAction, env_params: TEnvParams
-    ) -> Tuple[TObs, TEnvState, TLogReward, TDone, Dict[Any, Any]]:
+    ) -> tuple[TObs, TEnvState, TLogReward, TDone, dict[Any, Any]]:
         """Performs batched step transitions in the environment."""
         next_state, done, info = self.transition(state, action, env_params)
         done = jnp.astype(done, jnp.bool)  # Ensure that done is boolean
@@ -148,7 +148,7 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         state: TEnvState,
         backward_action: TBackwardAction,
         env_params: TEnvParams,
-    ) -> Tuple[TObs, TEnvState, TLogReward, TDone, Dict[Any, Any]]:
+    ) -> tuple[TObs, TEnvState, TLogReward, TDone, dict[Any, Any]]:
         """
         Performs batched backward step transitions in the environment.
         Important: `done` is true if the state is the initial one.
@@ -159,14 +159,14 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         log_rewards = jnp.zeros(state.is_pad.shape, dtype=jnp.float32)
         return self.get_obs(state, env_params), state, log_rewards, done, info
 
-    def reset(self, num_envs: int, env_params: TEnvParams) -> Tuple[TObs, TEnvState]:
+    def reset(self, num_envs: int, env_params: TEnvParams) -> tuple[TObs, TEnvState]:
         """Performs batched resetting of environment."""
         state = self.get_init_state(num_envs)
         return self.get_obs(state, env_params), state
 
     def transition(
         self, state: TEnvState, action: TAction, env_params: TEnvParams
-    ) -> Tuple[TEnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[TEnvState, TDone, dict[Any, Any]]:
         """Environment-specific step transition."""
         next_state, done, info = jax.vmap(self._single_transition, in_axes=(0, 0, None))(
             state, action, env_params
@@ -178,7 +178,7 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         state: TEnvState,
         backward_action: TAction,
         env_params: TEnvParams,
-    ) -> Tuple[TEnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[TEnvState, TDone, dict[Any, Any]]:
         """Environment-specific step backward transition."""
         prev_state, done, info = jax.vmap(self._single_backward_transition, in_axes=(0, 0, None))(
             state, backward_action, env_params
@@ -188,7 +188,7 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
     @abstractmethod
     def _single_transition(
         self, state: TEnvState, action: TAction, env_params: TEnvParams
-    ) -> Tuple[TEnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[TEnvState, TDone, dict[Any, Any]]:
         """Environment-specific step transition. NOTE: this is not batched!"""
         raise NotImplementedError
 
@@ -198,7 +198,7 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         state: TEnvState,
         backward_action: TAction,
         env_params: TEnvParams,
-    ) -> Tuple[TEnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[TEnvState, TDone, dict[Any, Any]]:
         """
         Environment-specific step backward transition.
         NOTE: this is not batched!

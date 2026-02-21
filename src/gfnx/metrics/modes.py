@@ -1,12 +1,12 @@
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import chex
 import jax
 import jax.numpy as jnp
 
-
 from ..base import TEnvironment, TEnvState
-from .base import BaseMetricsModule, MetricsState, BaseInitArgs, BaseUpdateArgs, BaseProcessArgs
+from .base import BaseInitArgs, BaseMetricsModule, BaseProcessArgs, BaseUpdateArgs, MetricsState
 
 
 @chex.dataclass

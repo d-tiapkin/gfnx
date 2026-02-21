@@ -1,4 +1,5 @@
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import chex
 import jax
@@ -56,8 +57,8 @@ class TopKMetricsModule(BaseMetricsModule):
         fwd_policy_fn: TPolicyFn,
         num_traj: int,
         batch_size: int,
-        top_k: list[int] = [10, 50, 100],
-        distance_fn: Callable[[TEnvState, TEnvState], float] = None,
+        top_k: list[int] | None = None,
+        distance_fn: Callable[[TEnvState, TEnvState], float] | None = None,
     ):
         """Initialize the top-K metrics module.
 
@@ -72,6 +73,8 @@ class TopKMetricsModule(BaseMetricsModule):
             distance_fn: Function that computes distance between two environment states
                 for diversity measurement. Must return a scalar distance value.
         """
+        if top_k is None:
+            top_k = [10, 50, 100]
         self.num_traj = num_traj
         self.batch_size = batch_size
         self.env = env
@@ -203,7 +206,7 @@ class TopKMetricsModule(BaseMetricsModule):
         for idx, k in enumerate(self.top_k):
             top_idx = arg_sort_idx[-k:]
             topk_rew = topk_rew.at[idx].set(jnp.mean(rewards[top_idx]))
-            top_samples = jax.tree.map(lambda x: x[top_idx], final_env_state)
+            top_samples = jax.tree.map(lambda x, top_idx=top_idx: x[top_idx], final_env_state)
             num_nonzero_dist = (k - 1) * k
             distance_matrix = self._get_distance_matrix(top_samples, top_samples)
             topk_div = topk_div.at[idx].set(distance_matrix.sum() / num_nonzero_dist)
