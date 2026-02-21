@@ -7,8 +7,8 @@ import jax.numpy as jnp
 from ..base import TRewardModule
 from ..utils import QM9_SMALL_BLOCKS, QM9_SMALL_FULL_ALPHABET
 from .sequence import (
-    EnvParams,  # noqa: F401
-    EnvState,  # noqa: F401
+    EnvParams,
+    EnvState,
     FixedPrependAppendSequenceEnvironment,
 )
 
@@ -55,8 +55,7 @@ class QM9SmallEnvironment(FixedPrependAppendSequenceEnvironment):
             reward = self.reward_module.reward(batched_env_state, env_params)
             return rewards.at[state].set(reward[0])
 
-        rewards = jax.lax.fori_loop(0, self.nchar**self.max_length, update_rewards, rewards)
-        return rewards
+        return jax.lax.fori_loop(0, self.nchar**self.max_length, update_rewards, rewards)
 
     def get_true_distribution(self, env_params: EnvParams) -> chex.Array:
         """

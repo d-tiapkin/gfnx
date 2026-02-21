@@ -24,6 +24,8 @@ import optax
 from jax_tqdm import loop_tqdm
 from jaxtyping import Array, Int
 from omegaconf import OmegaConf
+from utils.checkpoint import save_checkpoint
+from utils.logger import Writer
 
 import gfnx
 from gfnx.metrics import (
@@ -34,9 +36,6 @@ from gfnx.metrics import (
     MultiMetricsState,
     SWMeanRewardSWMetricsModule,
 )
-
-from utils.logger import Writer
-from utils.checkpoint import save_checkpoint
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -156,7 +155,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
 
         # Apply epsilon exploration to logits
         if train:
-            rng_key, exploration_key = jax.random.split(fwd_rng_key)
+            _rng_key, exploration_key = jax.random.split(fwd_rng_key)
             batch_size, _ = fwd_logits.shape
             exploration_mask = jax.random.bernoulli(exploration_key, cur_eps, (batch_size,))
             fwd_logits = jnp.where(exploration_mask[..., None], 0, fwd_logits)
@@ -259,8 +258,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         log_pb_plus_rewards_along_traj = log_pb_selected + masked_log_rewards_at_steps
         target = jnp.sum(log_pb_plus_rewards_along_traj, axis=1)
 
-        loss = optax.losses.squared_error(log_pf_traj, target).mean()
-        return loss
+        return optax.losses.squared_error(log_pf_traj, target).mean()
 
     # Prepare parameters for the loss function and gradient calculation
     params_for_loss = {"model_params": policy_params, "logZ": train_state.logZ}

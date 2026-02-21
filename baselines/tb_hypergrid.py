@@ -24,6 +24,8 @@ import numpy as np
 import optax
 from jax_tqdm import loop_tqdm
 from omegaconf import OmegaConf
+from utils.checkpoint import save_checkpoint
+from utils.logger import Writer
 
 import gfnx
 from gfnx.metrics import (
@@ -34,10 +36,6 @@ from gfnx.metrics import (
     MultiMetricsModule,
     MultiMetricsState,
 )
-
-
-from utils.logger import Writer
-from utils.checkpoint import save_checkpoint
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -250,8 +248,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         log_pb_plus_rewards_along_traj = log_pb_selected + masked_log_rewards_at_steps
         target = jnp.sum(log_pb_plus_rewards_along_traj, axis=1)
 
-        loss = optax.losses.squared_error(log_pf_traj, target).mean()
-        return loss
+        return optax.losses.squared_error(log_pf_traj, target).mean()
 
     # Prepare parameters for the loss function and gradient calculation
     # policy_params are model network parameters
@@ -503,7 +500,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         ),
     })
     # Initialize the metrics state
-    eval_init_key, new_eval_init_key = jax.random.split(eval_init_key)
+    eval_init_key, _new_eval_init_key = jax.random.split(eval_init_key)
     metrics_state = metrics_module.init(
         eval_init_key,
         metrics_module.InitArgs(

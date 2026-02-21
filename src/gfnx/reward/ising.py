@@ -41,5 +41,4 @@ class IsingRewardModule(BaseRewardModule[IsingEnvState, IsingEnvParams]):
         """
         canonical = 2 * state.state - 1
         J = env_params.reward_params.J
-        log_reward = jnp.einsum("bi,ij,bj->b", canonical, J, canonical)
-        return log_reward
+        return jnp.einsum("bi,ij,bj->b", canonical, J, canonical)

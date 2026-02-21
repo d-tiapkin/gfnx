@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any
 
 import chex
 import jax
@@ -98,7 +98,7 @@ class ELBOMetricsModule(BaseMetricsModule):
         """
         return metrics_state
 
-    def get(self, metrics_state: ELBOMetricState) -> Dict[str, Any]:
+    def get(self, metrics_state: ELBOMetricState) -> dict[str, Any]:
         """Returns the computed ELBO metric from the current state.
 
         Args:

@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from typing import Tuple
 
 import jax.numpy as jnp
 
@@ -53,7 +52,7 @@ CONFIGS = {
 }
 
 
-def get_phylo_initialization_args(dataset_name: str, data_folder: Path) -> Tuple[dict, dict]:
+def get_phylo_initialization_args(dataset_name: str, data_folder: Path) -> tuple[dict, dict]:
     """
     Prepares the arguments required to initialize the Phylogenetic Tree Environment
     and its associated reward module from the provided dataset.

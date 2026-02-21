@@ -1,5 +1,6 @@
 from abc import abstractmethod
-from typing import Any, Callable, Dict, Tuple
+from collections.abc import Callable
+from typing import Any
 
 import chex
 import jax
@@ -147,7 +148,7 @@ class BaseCorrelationMetricsModule(BaseMetricsModule):
             log_ratio_traj_transformed=log_ratio_traj_transformed,
         )
 
-    def get(self, metrics_state: CorrelationMetricsState) -> Dict[str, Any]:
+    def get(self, metrics_state: CorrelationMetricsState) -> dict[str, Any]:
         """Compute and return correlation metrics from the current state.
 
         Calculates two correlation measures between transformed model predictions and
@@ -185,7 +186,7 @@ class BaseCorrelationMetricsModule(BaseMetricsModule):
         metrics_state: CorrelationMetricsState,
         rng_key: chex.PRNGKey,
         args: ProcessArgs,
-    ) -> Tuple[TEnvState, jnp.ndarray]:
+    ) -> tuple[TEnvState, jnp.ndarray]:
         """Get terminal states and transformed log rewards for correlation computation.
 
         This method should be implemented by subclasses to provide the terminal states
@@ -274,8 +275,7 @@ class BaseCorrelationMetricsModule(BaseMetricsModule):
 
         # Average ratios over rounds for each test datum using log-sum-exp
         log_ratio_traj = jax.nn.logsumexp(log_ratio_traj, axis=0)
-        log_ratio_traj = log_ratio_traj - jnp.log(self.n_rounds)
-        return log_ratio_traj
+        return log_ratio_traj - jnp.log(self.n_rounds)
 
 
 class OnPolicyCorrelationMetricsModule(BaseCorrelationMetricsModule):
@@ -368,8 +368,8 @@ class OnPolicyCorrelationMetricsModule(BaseCorrelationMetricsModule):
         dummy_terminal_states = self.env.reset(self.n_terminal_states, args.env_params)[1]
         return CorrelationMetricsState(
             test_terminal_states=dummy_terminal_states,
-            test_log_rewards_transformed=jnp.zeros((self.domain_size)),
-            log_ratio_traj_transformed=jnp.zeros((self.domain_size)),
+            test_log_rewards_transformed=jnp.zeros(self.domain_size),
+            log_ratio_traj_transformed=jnp.zeros(self.domain_size),
         )
 
     def _get_states_and_rewards(
@@ -377,7 +377,7 @@ class OnPolicyCorrelationMetricsModule(BaseCorrelationMetricsModule):
         metrics_state: CorrelationMetricsState,
         rng_key: chex.PRNGKey,
         args: BaseCorrelationMetricsModule.ProcessArgs,
-    ) -> Tuple[TEnvState, jnp.ndarray]:
+    ) -> tuple[TEnvState, jnp.ndarray]:
         """Generate fresh data on-policy.
 
         This method performs the core computation for on-policy correlation evaluation:
@@ -466,7 +466,7 @@ class TestCorrelationMetricsModule(BaseCorrelationMetricsModule):
         metrics_state: CorrelationMetricsState,
         rng_key: chex.PRNGKey,
         args: BaseCorrelationMetricsModule.ProcessArgs,
-    ) -> Tuple[TEnvState, jnp.ndarray]:
+    ) -> tuple[TEnvState, jnp.ndarray]:
         """Return existing test data from the metrics state.
 
         This method simply returns the terminal states and transformed log-rewards

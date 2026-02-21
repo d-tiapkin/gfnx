@@ -6,7 +6,8 @@ Credits: https://github.com/RobertTLange/gymnax
 
 import collections
 from abc import ABC, abstractmethod
-from typing import Any, Sequence, Union
+from collections.abc import Sequence
+from typing import Any
 
 import chex
 import jax
@@ -44,8 +45,7 @@ class Discrete(Space):
         """Check whether specific object is within space."""
         # type_cond = isinstance(x, self.dtype)
         # shape_cond = (x.shape == self.shape)
-        range_cond = jnp.logical_and(x >= 0, x < self.n)
-        return range_cond
+        return jnp.logical_and(x >= 0, x < self.n)
 
 
 class Box(Space):
@@ -53,8 +53,8 @@ class Box(Space):
 
     def __init__(
         self,
-        low: Union[jnp.ndarray, float],
-        high: Union[jnp.ndarray, float],
+        low: jnp.ndarray | float,
+        high: jnp.ndarray | float,
         shape: Any,  # Tuple[int],
         dtype: jnp.dtype = jnp.float32,
     ):
@@ -73,8 +73,7 @@ class Box(Space):
         """Check whether specific object is within space."""
         # type_cond = isinstance(x, self.dtype)
         # shape_cond = (x.shape == self.shape)
-        range_cond = jnp.logical_and(jnp.all(x >= self.low), jnp.all(x <= self.high))
-        return range_cond
+        return jnp.logical_and(jnp.all(x >= self.low), jnp.all(x <= self.high))
 
 
 class Dict(Space):
@@ -112,7 +111,7 @@ class Tuple(Space):
     def sample(self, rng: chex.PRNGKey) -> Any:  # Tuple[chex.Array]:
         """Sample random action from all subspaces."""
         key_split = jax.random.split(rng, self.num_spaces)
-        return tuple([s.sample(key_split[i]) for i, s in enumerate(self.spaces)])
+        return tuple(s.sample(key_split[i]) for i, s in enumerate(self.spaces))
 
     def contains(self, x: Sequence) -> bool:
         """Check whether dimensions of object are within subspace."""

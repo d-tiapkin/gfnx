@@ -73,5 +73,4 @@ def construct_binary_test_set(rng_key: chex.PRNGKey, mode_set: chex.Array):
             test_set.append(jnp.logical_xor(mode, change_mask))
             assert len(test_set[-1]) == len_mode
             assert hamming_distance(test_set[-1], mode) == cnt
-    final_test_set = jnp.array(test_set)
-    return final_test_set
+    return jnp.array(test_set)

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import chex
 import jax
@@ -108,7 +108,7 @@ class SequenceEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
-    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
         raise NotImplementedError
 
     def _single_backward_transition(
@@ -116,7 +116,7 @@ class SequenceEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         state: EnvState,
         backward_action: TBackwardAction,
         env_params: EnvParams,
-    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
         """
         Environment-specific step backward transition. Rewards always zero!
         """
@@ -126,7 +126,7 @@ class SequenceEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         """Applies observation function to state."""
         # Add BOS token to the beginning of the sentence
         num_envs = state.is_pad.shape[0]
-        obs = jnp.concat(
+        return jnp.concat(
             [
                 jnp.full(
                     shape=(num_envs, 1),
@@ -137,7 +137,6 @@ class SequenceEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             ],
             axis=-1,
         )
-        return obs
 
     def get_backward_action(
         self,
@@ -213,7 +212,7 @@ class FixedAutoregressiveSequenceEnvironment(SequenceEnvironment):
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
-    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
         is_terminal = state.is_terminal
 
         def get_next_state_terminal(state: EnvState, action: TAction) -> EnvState:
@@ -224,13 +223,12 @@ class FixedAutoregressiveSequenceEnvironment(SequenceEnvironment):
             pos_to_update = self.max_length - num_pad
             next_tokens = state.tokens.at[pos_to_update].set(action)
             is_done = jnp.all(next_tokens != self.pad_token)
-            next_state = EnvState(
+            return EnvState(
                 tokens=next_tokens,
                 is_terminal=is_done,
                 is_initial=False,
                 is_pad=False,
             )
-            return next_state
 
         next_state: EnvState = jax.lax.cond(
             is_terminal, get_next_state_terminal, get_next_state_not_terminal, state, action
@@ -240,7 +238,7 @@ class FixedAutoregressiveSequenceEnvironment(SequenceEnvironment):
 
     def _single_backward_transition(
         self, state: EnvState, backward_action: TBackwardAction, env_params: EnvParams
-    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
         """
         Environment-specific step backward transition. Rewards always zero!
         """
@@ -331,7 +329,7 @@ class FixedPrependAppendSequenceEnvironment(SequenceEnvironment):
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
-    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
         is_terminal = state.is_terminal
 
         def get_next_state_terminal(state: EnvState, action: TAction) -> EnvState:
@@ -355,13 +353,12 @@ class FixedPrependAppendSequenceEnvironment(SequenceEnvironment):
                 action,
             )
             is_done = jnp.all(next_tokens != self.pad_token)
-            next_state = EnvState(
+            return EnvState(
                 tokens=next_tokens,
                 is_terminal=is_done,
                 is_initial=False,
                 is_pad=False,
             )
-            return next_state
 
         next_state: EnvState = jax.lax.cond(
             is_terminal, get_next_state_terminal, get_next_state_not_terminal, state, action
@@ -374,7 +371,7 @@ class FixedPrependAppendSequenceEnvironment(SequenceEnvironment):
         state: EnvState,
         backward_action: TBackwardAction,
         env_params: EnvParams,
-    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
         """
         Environment-specific step backward transition. Rewards are always zero!
         """
@@ -499,7 +496,7 @@ class AutoregressiveSequenceEnvironment(SequenceEnvironment):
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
-    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
         is_terminal = state.is_terminal
 
         def get_next_state_terminal(state: EnvState, action: TAction) -> EnvState:
@@ -514,13 +511,12 @@ class AutoregressiveSequenceEnvironment(SequenceEnvironment):
                 jnp.all(next_tokens != self.pad_token), # All pad tokens are replaced by characters
                 action == self.stop_action,  # EOS token is generated
             )
-            next_state = EnvState(
+            return EnvState(
                 tokens=next_tokens,
                 is_terminal=is_done,
                 is_initial=False,
                 is_pad=False,
             )
-            return next_state
 
         next_state: EnvState = jax.lax.cond(
             is_terminal, get_next_state_terminal, get_next_state_not_terminal, state, action
@@ -530,7 +526,7 @@ class AutoregressiveSequenceEnvironment(SequenceEnvironment):
 
     def _single_backward_transition(
         self, state: EnvState, backward_action: TBackwardAction, env_params: EnvParams
-    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
         """
         Environment-specific step backward transition. Rewards always zero!
         """
@@ -623,7 +619,7 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
-    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
         is_terminal = state.is_terminal
 
         def get_next_state_terminal(state: EnvState, action: TAction) -> EnvState:
@@ -634,13 +630,12 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
             pos, word = jnp.unravel_index(action, (self.max_length, self.nchar))
             next_tokens = state.tokens.at[pos].set(word)
             is_done = jnp.all(next_tokens != self.pad_token)
-            next_state = EnvState(
+            return EnvState(
                 tokens=next_tokens,
                 is_terminal=is_done,
                 is_initial=False,
                 is_pad=False,
             )
-            return next_state
 
         next_state: EnvState = jax.lax.cond(
             is_terminal,
@@ -657,7 +652,7 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
         state: EnvState,
         backward_action: TBackwardAction,
         env_params: EnvParams,
-    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
         """
         Environment-specific step backward transition. Rewards always zero!
         """

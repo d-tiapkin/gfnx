@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any
 
 import chex
 import jax
@@ -11,7 +11,7 @@ from ..utils.rollout import (
     backward_rollout,
     backward_trajectory_log_probs,
 )
-from .base import BaseMetricsModule, BaseProcessArgs, EmptyUpdateArgs, EmptyInitArgs, MetricsState
+from .base import BaseMetricsModule, BaseProcessArgs, EmptyInitArgs, EmptyUpdateArgs, MetricsState
 
 
 @chex.dataclass
@@ -104,7 +104,7 @@ class EUBOMetricsModule(BaseMetricsModule):
         """
         return metrics_state
 
-    def get(self, metrics_state: EUBOMetricState) -> Dict[str, Any]:
+    def get(self, metrics_state: EUBOMetricState) -> dict[str, Any]:
         """Returns the computed EUBO metric from the current state.
 
         Args:

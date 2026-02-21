@@ -164,7 +164,7 @@ class GNNPolicy(eqx.Module):
         )
 
     def __call__(self, adjacency: chex.Array) -> chex.Array:
-        batch_size, num_variables, num_variables = adjacency.shape  # Batch, Nodes
+        batch_size, num_variables, _ = adjacency.shape  # Batch, Nodes
         # Convert batch of adjacency matrices to a graph tuple
         graph_tuple = self._to_graph_tuple(adjacency)
         features = graph_tuple._replace(
@@ -385,9 +385,8 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         done_or_pad = transitions.done | transitions.pad
         error = next_sink_logprobs + fwd_logprobs - sink_logprobs - bwd_logprobs - delta_score
         error = jnp.where(done_or_pad, 0.0, error)
-        loss = optax.huber_loss(error).sum() / jnp.logical_not(done_or_pad).sum()
+        return optax.huber_loss(error).sum() / jnp.logical_not(done_or_pad).sum()
 
-        return loss
 
     mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(train_state.model)
     # Step 3. Update the model with grads

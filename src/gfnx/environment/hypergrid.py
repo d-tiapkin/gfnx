@@ -1,6 +1,6 @@
 from itertools import product
 from math import prod
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import chex
 import jax
@@ -97,7 +97,7 @@ class HypergridEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
-    ) -> Tuple[EnvState, TDone, Dict[Any, Any]]:
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
         is_terminal = state.is_terminal  # bool
 
         def get_state_terminal() -> EnvState:
@@ -129,7 +129,7 @@ class HypergridEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         state: EnvState,
         backward_action: chex.Array,
         env_params: EnvParams,
-    ) -> Tuple[chex.Array, EnvState, chex.Array, chex.Array, Dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, chex.Array, chex.Array, dict[Any, Any]]:
         """
         Environment-specific step backward transition. Rewards always zero!
         """
@@ -267,8 +267,7 @@ class HypergridEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             reward = self.reward_module.reward(batched_env_state, env_params)
             return rewards.at[state].set(reward[0])
 
-        rewards = jax.lax.fori_loop(0, self.side**self.dim, update_rewards, rewards)
-        return rewards
+        return jax.lax.fori_loop(0, self.side**self.dim, update_rewards, rewards)
 
     def get_true_distribution(self, env_params: EnvParams) -> chex.Array:
         """

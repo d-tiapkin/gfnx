@@ -42,5 +42,4 @@ class EqxTransformerRewardModel(eqx.Module):
         )["layers_out"][-1]  # [seq_len, hidden_size]
         x = x.mean(axis=0)  # Average pooling
         # MLP layers for a final prediction
-        x = self.pooler(x)
-        return x
+        return self.pooler(x)

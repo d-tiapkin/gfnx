@@ -118,9 +118,9 @@ def fit_model(
 
             rng_key, batch_key = jax.random.split(rng_key)
             batch_keys = jax.random.split(batch_key, batch_data.shape[0])
-            pred_score = jax.vmap(lambda x, key: model(x, enable_dropout=True, key=key))(
-                batch_data, batch_keys
-            ).squeeze()
+            pred_score = jax.vmap(
+                lambda x, key, model=model: model(x, enable_dropout=True, key=key)
+            )(batch_data, batch_keys).squeeze()
             loss = batch_loss_fn(pred_score, batch_target).mean()
             if config.task == "classification":
                 acc = jnp.mean(jnp.equal(pred_score > 0, batch_target))

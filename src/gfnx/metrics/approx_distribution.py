@@ -1,4 +1,5 @@
-from typing import Any, Dict
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 import chex
 import flashbax as fbx
@@ -81,7 +82,7 @@ class ApproxDistributionMetricsModule(BaseMetricsModule):
         buffer_size: Maximum number of states to store in the replay buffer.
     """
 
-    _supported_metrics = {
+    _supported_metrics: ClassVar[dict[str, Callable[..., chex.Array]]] = {
         "tv": total_variation_distance,
         "kl": kl_divergence,
         "jsd": jensen_shannon_divergence,
@@ -118,7 +119,7 @@ class ApproxDistributionMetricsModule(BaseMetricsModule):
             raise ValueError("buffer_size must be a positive integer")
         if not isinstance(metrics, list) or not all(isinstance(m, str) for m in metrics):
             raise ValueError("metrics must be a list of strings")
-        if not all(m in self._supported_metrics.keys() for m in metrics):
+        if not all(m in self._supported_metrics for m in metrics):
             raise ValueError(
                 f"Unsupported metrics. Supported metrics are: \
                     {self._supported_metrics}"
@@ -249,7 +250,7 @@ class ApproxDistributionMetricsModule(BaseMetricsModule):
         )
         return metrics_state.replace(empirical_distribution=empirical_distribution)
 
-    def get(self, metrics_state: ApproxDistributionMetricsState) -> Dict[str, Any]:
+    def get(self, metrics_state: ApproxDistributionMetricsState) -> dict[str, Any]:
         """Get the computed distribution metrics from the processed state.
 
         Computes and returns the requested distribution metrics by comparing the

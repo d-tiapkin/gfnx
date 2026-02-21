@@ -5,7 +5,6 @@ import pickle
 import string
 from itertools import chain, count, islice, permutations, product
 from pathlib import Path
-from typing import Tuple
 
 import chex
 import jax
@@ -74,7 +73,7 @@ def construct_all_dags(num_variables):
         permuted = np.packbits(permuted, axis=1)
         compressed_dags.update(map(tuple, permuted))
 
-    compressed_dags = sorted(list(compressed_dags))
+    compressed_dags = sorted(compressed_dags)
     compressed_dags = np.array(compressed_dags)
     adjacencies = np.unpackbits(compressed_dags, axis=1, count=num_variables**2)
     return jnp.array(adjacencies.reshape(-1, num_variables, num_variables))
@@ -89,18 +88,17 @@ def get_transitive_closure(adjacency_matrix: chex.Array) -> chex.Array:
     """
 
     def power_iteration(
-        i: int, carry: Tuple[chex.Array, chex.Array]
-    ) -> Tuple[chex.Array, chex.Array]:
+        i: int, carry: tuple[chex.Array, chex.Array]
+    ) -> tuple[chex.Array, chex.Array]:
         curr_matrix, curr_closure = carry
         next_matrix = curr_matrix @ adjacency_matrix
         next_closure = curr_closure | next_matrix
         return next_matrix, next_closure
 
     num_variables = adjacency_matrix.shape[0]
-    transitive_closure = jax.lax.fori_loop(
+    return jax.lax.fori_loop(
         0, num_variables, power_iteration, (adjacency_matrix, adjacency_matrix)
     )[1]
-    return transitive_closure
 
 
 def get_markov_blanket(adjacency_matrix: chex.Array) -> chex.Array:
@@ -117,8 +115,7 @@ def get_markov_blanket(adjacency_matrix: chex.Array) -> chex.Array:
         parents = adjacency_matrix[:, i]
         children = adjacency_matrix[i, :]
         spouses = jnp.sum(adjacency_matrix * children[None,], axis=1).astype(jnp.bool)
-        blanket = parents | children | spouses
-        return blanket
+        return parents | children | spouses
 
     num_variables = adjacency_matrix.shape[0]
     blanket = jax.vmap(get_single_blanket, in_axes=(None, 0))(
@@ -165,8 +162,10 @@ def sample_erdos_renyi_graph(
 
 
 def sample_linear_gaussian(
-    graph, loc_edges=0.0, scale_edges=1.0, obs_scale=math.sqrt(0.1), rng=None
+    graph, loc_edges=0.0, scale_edges=1.0, obs_scale=None, rng=None
 ):
+    if obs_scale is None:
+        obs_scale = math.sqrt(0.1)
     if rng is None:
         rng = np.random.default_rng()
 
@@ -217,10 +216,12 @@ def generate_dataset(
     num_train_samples=100,
     loc_edges=0.0,
     scale_edges=1.0,
-    obs_scale=math.sqrt(0.1),
+    obs_scale: float | None = None,
     folder: Path | None = None,
 ):
     data_rng = np.random.default_rng(seed=data_seed)
+    if obs_scale is None:
+        obs_scale = math.sqrt(0.1)
 
     # Generate DAG
     graph = sample_erdos_renyi_graph(

@@ -214,8 +214,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         leaf_loss = (loss * done).sum() / (jnp.logical_and(transition, done)).sum()
         flow_loss = ((loss * not_done).sum() / (jnp.logical_and(transition, not_done)).sum())
 
-        loss = leaf_loss * 25 + flow_loss
-        return loss 
+        return leaf_loss * 25 + flow_loss
 
     mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(train_state.model)
     # Step 3. Update the model with grads

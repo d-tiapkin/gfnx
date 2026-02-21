@@ -24,12 +24,11 @@ import numpy as np
 import optax
 from jax_tqdm import loop_tqdm
 from omegaconf import OmegaConf
+from utils.checkpoint import save_checkpoint
+from utils.logger import Writer
 
 import gfnx
 from gfnx.metrics import ApproxDistributionMetricsModule, ApproxDistributionMetricsState
-
-from utils.logger import Writer
-from utils.checkpoint import save_checkpoint
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)

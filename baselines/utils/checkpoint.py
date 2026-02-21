@@ -43,6 +43,5 @@ def load_checkpoint(path: str, state: Any) -> Any:
         os.path.abspath(path),  # Checkpoint path should be absolute.
         state_params
     )
-    loaded_state = eqx.combine(loaded_params, state_static)
+    return eqx.combine(loaded_params, state_static)
 
-    return loaded_state

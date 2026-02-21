@@ -24,12 +24,11 @@ import optax
 from jax_tqdm import loop_tqdm
 from jaxtyping import Array, Int
 from omegaconf import OmegaConf
+from utils.checkpoint import save_checkpoint
+from utils.logger import Writer
 
 import gfnx
 from gfnx.metrics import MultiMetricsModule, MultiMetricsState, TopKMetricsModule
-
-from utils.logger import Writer
-from utils.checkpoint import save_checkpoint
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -300,8 +299,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         log_pb_plus_rewards_along_traj = log_pb_selected + masked_log_rewards_at_steps
         target = jnp.sum(log_pb_plus_rewards_along_traj, axis=1)
 
-        loss = optax.losses.squared_error(log_pf_traj, target).mean()
-        return loss
+        return optax.losses.squared_error(log_pf_traj, target).mean()
 
     # Prepare parameters for the loss function and gradient calculation
     # policy_params are model network parameters

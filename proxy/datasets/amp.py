@@ -8,7 +8,6 @@ repository, as the data files are stored using git-lfs.
 To install git-lfs, follow the instructions here: https://git-lfs.github.com/
 """
 
-from typing import Tuple
 
 import chex
 import jax.numpy as jnp
@@ -73,10 +72,10 @@ class AMPRewardProxyDataset(RewardProxyDataset):
             processed_seqs.append(seq[: self.max_len])
         return jnp.array(processed_seqs)
 
-    def train_set(self) -> Tuple[chex.Array, chex.Array]:
+    def train_set(self) -> tuple[chex.Array, chex.Array]:
         return self.train_data, self.train_score
 
-    def test_set(self) -> Tuple[chex.Array, chex.Array]:
+    def test_set(self) -> tuple[chex.Array, chex.Array]:
         return self.test_data, self.test_score
 
     @property

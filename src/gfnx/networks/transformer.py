@@ -100,10 +100,9 @@ class EmbedderBlock(eqx.Module):
     ) -> Float[Array, "seq_len embedding_size"]:
         token_emb = jax.vmap(self.token_embedder)(token_ids)
         keys = None if key is None else jax.random.split(key, num=token_ids.shape[0])
-        embedded_inputs = jax.vmap(
+        return jax.vmap(
             lambda x, y, z: self.position_embedder(x, y, enable_dropout=enable_dropout, key=z)
         )(token_emb, position_ids, keys)
-        return embedded_inputs
 
 
 class FeedForwardBlock(eqx.Module):
@@ -157,8 +156,7 @@ class FeedForwardBlock(eqx.Module):
         output = self.dropout(output, inference=not enable_dropout, key=key2)
         # Residual and layer norm
         output += inputs
-        output = self.layernorm2(output)
-        return output
+        return self.layernorm2(output)
 
 
 class AttentionBlock(eqx.Module):
@@ -211,8 +209,7 @@ class AttentionBlock(eqx.Module):
         )
 
         result = attention_output
-        result = self.dropout(result, inference=not enable_dropout, key=dropout_key)
-        return result
+        return self.dropout(result, inference=not enable_dropout, key=dropout_key)
 
     def make_self_attention_mask(
         self, mask: Int[Array, " seq_len"]
@@ -271,10 +268,9 @@ class TransformerLayer(eqx.Module):
         )
         attention_output = attention_output + inputs  # Residual connection
         ff_keys = None if ff_key is None else jax.random.split(ff_key, num=seq_len)
-        output = jax.vmap(self.ff_block, in_axes=(0, None, 0))(
+        return jax.vmap(self.ff_block, in_axes=(0, None, 0))(
             attention_output, enable_dropout, ff_keys
         )
-        return output
 
 
 class Encoder(eqx.Module):

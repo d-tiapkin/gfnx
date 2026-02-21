@@ -24,6 +24,8 @@ import optax
 from jax_tqdm import loop_tqdm
 from jaxtyping import Array, Int
 from omegaconf import OmegaConf
+from utils.checkpoint import save_checkpoint
+from utils.logger import Writer
 
 import gfnx
 from gfnx.metrics import (
@@ -32,9 +34,6 @@ from gfnx.metrics import (
     MultiMetricsState,
     SWMeanRewardSWMetricsModule,
 )
-
-from utils.logger import Writer
-from utils.checkpoint import save_checkpoint
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)

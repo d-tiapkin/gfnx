@@ -1,14 +1,14 @@
-import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import matplotlib.colors as mcolors
-import numpy as np
-import jax.numpy as jnp
+from typing import ClassVar
 
-from typing import Tuple, List
+import jax.numpy as jnp
+import matplotlib
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib import patches
 
 from ..base import BaseRenderer, TAction
-from ..environment.hypergrid import HypergridEnvironment, EnvState, EnvParams
+from ..environment.hypergrid import EnvParams, EnvState, HypergridEnvironment
 
 
 class HypergridRenderer(BaseRenderer[EnvState]):
@@ -17,7 +17,7 @@ class HypergridRenderer(BaseRenderer[EnvState]):
     BORDER_WIDTH = 1 / 100
     TRAIL_WIDTH = 4 / 100
 
-    TOKEN_PATTERNS = {
+    TOKEN_PATTERNS: ClassVar[dict[str, np.ndarray]] = {
         "circle": np.array(
             [
                 [0, 0, 0, 0, 0, 0, 0, 0],
@@ -46,8 +46,8 @@ class HypergridRenderer(BaseRenderer[EnvState]):
         self.env = env
         self.env_params = env_params
         self.dpi = dpi
-        self.agent_artists: List[matplotlib.artist.Artist] = []
-        self.trajectory_artists: List[matplotlib.artist.Artist] = []
+        self.agent_artists: list[matplotlib.artist.Artist] = []
+        self.trajectory_artists: list[matplotlib.artist.Artist] = []
 
         self.reward_colormap = mcolors.LinearSegmentedColormap.from_list(
             "reward_gradient", [mcolors.to_rgba("lightgray"), mcolors.to_rgba("black")]
@@ -112,7 +112,7 @@ class HypergridRenderer(BaseRenderer[EnvState]):
         return self.fig
 
     def _render_trail(
-        self, start_pos: Tuple[int, int], end_pos: Tuple[int, int], color: np.ndarray
+        self, start_pos: tuple[int, int], end_pos: tuple[int, int], color: np.ndarray
     ) -> matplotlib.artist.Artist:
         """Render a trail between two positions using matplotlib lines."""
         start_x = start_pos[0] * self.CELL_WIDTH + self.CELL_WIDTH / 2
@@ -132,8 +132,8 @@ class HypergridRenderer(BaseRenderer[EnvState]):
         return line
 
     def _render_pattern(
-        self, pattern: np.ndarray, color: np.ndarray, position: Tuple[int, int]
-    ) -> List[matplotlib.artist.Artist]:
+        self, pattern: np.ndarray, color: np.ndarray, position: tuple[int, int]
+    ) -> list[matplotlib.artist.Artist]:
         """Render a single pattern at the specified position."""
         x = position[0] * self.CELL_WIDTH + self.BORDER_WIDTH
         y = position[1] * self.CELL_WIDTH + self.BORDER_WIDTH
@@ -141,7 +141,7 @@ class HypergridRenderer(BaseRenderer[EnvState]):
 
         pattern_rgba = np.zeros((*pattern.shape, len(color)))
         pattern_rgba[pattern == 1] = color
-        pattern_img = self.ax.imshow(
+        return self.ax.imshow(
             pattern_rgba,
             extent=[x, x + size, y + size, y],
             origin="lower",
@@ -150,9 +150,8 @@ class HypergridRenderer(BaseRenderer[EnvState]):
             zorder=3,
         )
 
-        return pattern_img
 
-    def _remove_artists(self, artists: List[matplotlib.artist.Artist]):
+    def _remove_artists(self, artists: list[matplotlib.artist.Artist]):
         """Remove matplotlib artists from the plot."""
         for artist in artists:
             artist.remove()

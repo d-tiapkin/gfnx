@@ -13,7 +13,7 @@ import functools
 import logging
 import os
 from functools import partial
-from typing import Literal, NamedTuple, Optional
+from typing import Literal, NamedTuple
 
 import chex
 import equinox as eqx
@@ -23,6 +23,8 @@ import jax.numpy as jnp
 import optax
 from jax_tqdm import loop_tqdm
 from omegaconf import OmegaConf
+from utils.checkpoint import save_checkpoint
+from utils.logger import Writer
 
 import gfnx
 from gfnx.environment.phylogenetic_tree import PhyloTreeEnvironment
@@ -38,9 +40,6 @@ from gfnx.utils import (
     create_exploration_schedule,
     get_phylo_initialization_args,
 )
-
-from utils.logger import Writer
-from utils.checkpoint import save_checkpoint
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -67,7 +66,7 @@ class TransformerPolicy(eqx.Module):
     layers: list[gfnx.networks.TransformerLayer]
     forward_mlp: eqx.nn.MLP
     flow_mlp: eqx.nn.MLP
-    backward_mlp: Optional[eqx.nn.MLP] = None
+    backward_mlp: eqx.nn.MLP | None = None
     train_backward_policy: bool
     n_fwd_actions: int
     n_bwd_actions: int
@@ -163,7 +162,7 @@ class TransformerPolicy(eqx.Module):
         key: chex.PRNGKey | None = None,
     ) -> chex.Array:
         # [num_nodes, sequence_length, bits_per_seq_elem]
-        N, S, BPSE = input.shape
+        N, _S, _BPSE = input.shape
         # [num_nodes, sequence_length * bits_per_seq_elem]
         input = input.reshape(N, -1)
         mask = jnp.any(input, axis=-1)  # [num_nodes]
