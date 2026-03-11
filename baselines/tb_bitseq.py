@@ -274,7 +274,6 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     new_logZ = eqx.apply_updates(train_state.logZ, updates["logZ"])
 
     # Perform all the required updates of metrics
-    transitions = gfnx.utils.split_traj_to_transitions(traj_data)
     metrics_state = train_state.metrics_module.update(
         metrics_state=train_state.metrics_state,
         rng_key=jax.random.key(0),  # not used, but required by the API
