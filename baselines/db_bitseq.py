@@ -167,6 +167,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         env=train_state.env,
         env_params=train_state.env_params,
     )
+    final_env_state = log_info["final_env_state"]
     transitions = gfnx.utils.split_traj_to_transitions(traj_data)
     bwd_actions = train_state.env.get_backward_action(
         transitions.state,
@@ -239,7 +240,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         args=train_state.metrics_module.UpdateArgs(
             metrics_args={
                 "modes": AccumulatedModesMetricsModule.UpdateArgs(
-                    states=transitions.state,
+                    states=final_env_state,
                 ),
             }
         ),

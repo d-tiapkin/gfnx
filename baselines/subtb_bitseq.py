@@ -170,6 +170,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         env=env,
         env_params=env_params,
     )
+    final_env_state = aux_info["final_env_state"]
     # Compute the RL reward / ELBO (for logging purposes)
     _, log_pb_traj = gfnx.utils.forward_trajectory_log_probs(
         env, traj_data, env_params
@@ -288,14 +289,13 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
 
     # Perform all the required updates of metrics
     # Peform all the requied updates of metrics
-    transitions = gfnx.utils.split_traj_to_transitions(traj_data)
     metrics_state = train_state.metrics_module.update(
         metrics_state=train_state.metrics_state,
         rng_key=jax.random.key(0),  # not used, but required by the API
         args=train_state.metrics_module.UpdateArgs(
             metrics_args={
                 "modes": AccumulatedModesMetricsModule.UpdateArgs(
-                    states=transitions.state,
+                    states=final_env_state,
                 ),
             }
         ),
