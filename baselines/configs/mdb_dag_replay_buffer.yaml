@@ -1,0 +1,74 @@
+seed: 111
+env_seed: 1
+eval_seed: 2
+
+num_train_steps: 100_000
+num_envs: 8
+
+agent:
+  learning_rate: 1e-4
+  start_eps: 1.0
+  end_eps: 0.1
+  exploration_steps: 50_000
+  target_update_every: 1000
+
+network:
+  num_layers: 1
+  mlp_num_layers: 1
+  embedding_size: 128
+  num_heads: 4
+
+environment:
+  # Data generation parameters
+  num_variables: 5
+  num_edges_per_node: 1
+  num_train_samples: 100
+  loc_edges: 0.0
+  scale_edges: 1.0
+  obs_scale: 0.316 # sqrt(0.1)
+
+  prior:
+    type: uniform
+
+  likelihood:
+    # Example of BGe score
+    type: bge_score # Or linear_gaussian_score
+    mean_obs: 0.0
+    alpha_mu: 1.0
+    alpha_w: null
+    # Example of linear Gaussian score
+    # type: linear_gaussian_score # Or bge_score
+    # prior_mean: 0.0
+    # prior_scale: 1.0
+    # obs_scale: 0.316 # sqrt(0.1)
+
+replay_buffer:
+  max_length: 100_000
+  min_length: 1000 # Prefill buffer with at least this many transitions
+  sample_batch_size: 32 # Batch size for sampling from the buffer
+
+metrics:
+  n_rounds: 10
+  batch_size: 29281  # DAGs number for 5 nodes
+
+logging:
+  track_each: 500 # in terms of total training steps, not divided by num_envs
+  eval_each: 500 # in terms of total training steps, not divited by num_envs
+  tqdm_print_rate: 500
+  use_writer: true
+  log_dir: null # If null, dir will be automatically created
+  checkpoint_dir: null # If null, dir will be automatically created
+
+# Technical information for writer
+writer:
+  writer_type: null # wandb, trackio or null (no logging online)
+  save_locally: true  # Save metrics locally or not
+  entity: null
+  project: dag-sampling
+
+# Technical information for hydra
+hydra:
+  run:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}
