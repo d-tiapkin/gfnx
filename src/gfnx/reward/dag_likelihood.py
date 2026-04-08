@@ -19,28 +19,25 @@ class BaseDAGLikelihood:
         """
         return None
 
-    def log_prob(self, state: DAGEnvState, env_params: DAGEnvParams) -> TLogReward:
+    def log_prob(self, state: DAGEnvState, likelihood_params: TRewardParams) -> TLogReward:
         """Computes the log-likelihood of the data given the state - graph G:
 
             log P(D | G) = sum_j LocalScore(X_j | Pa_G(X_j))
 
         Args:
-        - state: DAGEnvState, shape [B, ...], batch of states
-        - env_params: DAGEnvParams, params of environment,
-          always includes reward params
+        - state: DAGEnvState, shape [...], single state (no batch dim)
+        - likelihood_params: TRewardParams, params of likelihood
 
         Returns:
-        - TLogReward, shape [B], batch of log-likelihoods
+        - TLogReward, scalar log-likelihood
         """
-        num_graphs, num_variables = state.adjacency_matrix.shape[:2]
-        adjacency_matrix = state.adjacency_matrix.transpose(0, 2, 1)
-        parents = adjacency_matrix.reshape(-1, num_variables)
-        variables = jnp.tile(jnp.arange(num_variables), num_graphs)
-        likelihood_params = env_params.reward_params.likelihood_params
+        num_variables = state.adjacency_matrix.shape[0]
+        # Row i of adjacency_matrix.T gives the parents of node i
+        parents = state.adjacency_matrix.T  # [num_variables, num_variables]
+        variables = jnp.arange(num_variables)  # [num_variables]
 
         local_scores = self._local_score(variables, parents, likelihood_params)
-        local_scores = local_scores.reshape(num_graphs, num_variables)
-        return jnp.sum(local_scores, axis=1)  # [B]
+        return jnp.sum(local_scores)  # scalar
 
     def delta_score(
         self,
@@ -48,8 +45,9 @@ class BaseDAGLikelihood:
         action: TAction,
         next_state: DAGEnvState,
         env_params: DAGEnvParams,
+        likelihood_params: TRewardParams,
     ) -> TLogReward:
-        """Computes the delta-score for adding an edge X_i -> X_j to some grpah
+        """Computes the delta-score for adding an edge X_i -> X_j to some graph
         G, for a specific choice of local score. The delta-score is given by:
 
             LocalScore(X_j | Pa_G(X_j) U X_i) - LocalScore(X_j | Pa_G(X_j))
@@ -58,8 +56,8 @@ class BaseDAGLikelihood:
         - state: DAGEnvState, shape [B, ...], batch of states
         - action: DAGEnvAction, shape [B], batch of actions
         - next_state: DAGEnvState, shape [B, ...], batch of next states
-        - env_params: DAGEnvParams, params of environment,
-            always includes reward params
+        - env_params: DAGEnvParams, params of environment (for num_variables)
+        - likelihood_params: TRewardParams, params of likelihood
 
         Returns:
         - TLogReward, shape [B], batch of delta-scores
@@ -68,7 +66,6 @@ class BaseDAGLikelihood:
         _source, target = jnp.divmod(action, env_params.num_variables)
         parents = state.adjacency_matrix[arange, :, target]  # [B, num_variables]
         next_parents = next_state.adjacency_matrix[arange, :, target]  # [B, num_variables]
-        likelihood_params = env_params.reward_params.likelihood_params
         return self._local_score(target, next_parents, likelihood_params) - self._local_score(
             target, parents, likelihood_params
         )
@@ -99,6 +96,7 @@ class ZeroScore(BaseDAGLikelihood):
         action: TAction,
         next_state: DAGEnvState,
         env_params: DAGEnvParams,
+        likelihood_params: TRewardParams,
     ) -> TLogReward:
         return jnp.zeros(state.is_pad.shape[0])  # [B]
 

@@ -15,16 +15,15 @@ class BaseDAGPrior:
         """
         return None
 
-    def log_prob(self, state: DAGEnvState, env_params: DAGEnvParams) -> TLogReward:
+    def log_prob(self, state: DAGEnvState, prior_params: TRewardParams) -> TLogReward:
         """Computes log P(G).
 
         Args:
-        - state: DAGEnvState, shape [B, ...], batch of states
-        - env_params: DAGEnvParams, params of environment,
-          always includes reward params
+        - state: DAGEnvState, shape [...], single state (no batch dim)
+        - prior_params: TRewardParams, params of prior
 
         Returns:
-        - TLogReward, shape [B], batch of log P(G)
+        - TLogReward, scalar log P(G)
         """
         raise NotImplementedError
 
@@ -34,6 +33,7 @@ class BaseDAGPrior:
         action: TAction,
         next_state: DAGEnvState,
         env_params: DAGEnvParams,
+        prior_params: TRewardParams,
     ) -> TLogReward:
         """Computes log P(G') - log P(G), where G' is the result of adding
         the edge X_i -> X_j to G.
@@ -42,13 +42,13 @@ class BaseDAGPrior:
         - state: DAGEnvState, shape [B, ...], batch of states
         - action: DAGEnvAction, shape [B], batch of actions
         - next_state: DAGEnvState, shape [B, ...], batch of next states
-        - env_params: DAGEnvParams, params of environment,
-          always includes reward params
+        - env_params: DAGEnvParams, params of environment
+        - prior_params: TRewardParams, params of prior
 
         Returns:
         - TLogReward, shape [B], batch of log P(G') - log P(G)
         """
-        return self.log_prob(next_state, env_params) - self.log_prob(state, env_params)
+        return self.log_prob(next_state, prior_params) - self.log_prob(state, prior_params)
 
     @staticmethod
     def num_parents(state: DAGEnvState) -> chex.Array:
@@ -61,9 +61,9 @@ class UniformDAGPrior(BaseDAGPrior):
         # since we only need an unnormalized score in GFlowNets
         self._log_prior = jnp.zeros(num_variables)
 
-    def log_prob(self, state: DAGEnvState, env_params: DAGEnvParams) -> TLogReward:
+    def log_prob(self, state: DAGEnvState, prior_params: TRewardParams) -> TLogReward:
         num_parents = self.num_parents(state)
-        return jnp.sum(self._log_prior[num_parents], axis=1)  # [B]
+        return jnp.sum(self._log_prior[num_parents])  # scalar
 
     def delta_score(
         self,
@@ -71,5 +71,6 @@ class UniformDAGPrior(BaseDAGPrior):
         action: TAction,
         next_state: DAGEnvState,
         env_params: DAGEnvParams,
+        prior_params: TRewardParams,
     ) -> TLogReward:
         return jnp.zeros(state.is_pad.shape[0])  # [B]

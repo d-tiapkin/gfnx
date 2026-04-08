@@ -14,6 +14,7 @@ import pytest
 
 class TrainingResult(NamedTuple):
     """Container for training run results."""
+
     returncode: int
     stdout: str
     stderr: str
@@ -27,7 +28,7 @@ def training_paths():
     config_dir = root / "tests" / "baselines" / "configs"
     baselines_dir = root / "baselines"
     output_base = root / "tmp"
-    
+
     return {
         "script": script_path,
         "config_dir": config_dir,
@@ -45,8 +46,10 @@ def training_result(training_paths) -> TrainingResult:
         [
             "python",
             str(training_paths["script"]),
-            "--config-path", str(training_paths["config_dir"].absolute()),
-            "--config-name", "test_subtb_hypergrid",
+            "--config-path",
+            str(training_paths["config_dir"].absolute()),
+            "--config-name",
+            "test_subtb_hypergrid",
             f"hydra.run.dir={training_paths['output_base'].absolute()!s}",
             f"hydra.sweep.dir={training_paths['output_base'].absolute()!s}",
         ],
@@ -56,7 +59,7 @@ def training_result(training_paths) -> TrainingResult:
         timeout=600,  # 10 minute timeout
         check=False,
     )
-    
+
     return TrainingResult(
         returncode=result.returncode,
         stdout=result.stdout,
@@ -68,7 +71,7 @@ def training_result(training_paths) -> TrainingResult:
 def cleanup_training_output(training_paths, training_result):
     """Cleanup training output directories after all tests complete."""
     yield  # Tests run here
-    
+
     # Cleanup after all tests
     output_base = training_paths["output_base"]
     if output_base.exists():
@@ -94,25 +97,25 @@ def parse_last_training_loss(stdout: str) -> float:
         dict_str = match.group(1)
         try:
             metrics_dict = ast.literal_eval(dict_str)
-            if 'train/mean_loss' in metrics_dict:
-                return float(metrics_dict['train/mean_loss'])
+            if "train/mean_loss" in metrics_dict:
+                return float(metrics_dict["train/mean_loss"])
         except (ValueError, SyntaxError):
             continue
-    
+
     raise ValueError("No 'train/mean_loss' metric found in output")
 
 
 def test_training_metrics(training_result, training_paths):
     """Verify that final training loss is below the configured threshold."""
     from omegaconf import OmegaConf
-    
+
     config_path = training_paths["config_dir"] / "test_subtb_hypergrid.yaml"
     config = OmegaConf.load(config_path)
     loss_threshold = config.loss_threshold
-    
+
     stdout = training_result.stdout
     final_loss = parse_last_training_loss(stdout)
-    
+
     assert final_loss < loss_threshold, (
         f"Final training loss {final_loss:.6e} exceeds threshold {loss_threshold:.6e}"
     )

@@ -161,9 +161,7 @@ def sample_erdos_renyi_graph(
     return graph
 
 
-def sample_linear_gaussian(
-    graph, loc_edges=0.0, scale_edges=1.0, obs_scale=None, rng=None
-):
+def sample_linear_gaussian(graph, loc_edges=0.0, scale_edges=1.0, obs_scale=None, rng=None):
     if obs_scale is None:
         obs_scale = math.sqrt(0.1)
     if rng is None:

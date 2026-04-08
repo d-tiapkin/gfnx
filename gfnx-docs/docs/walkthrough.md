@@ -164,6 +164,7 @@ class TrainState(NamedTuple):
     exploration_schedule: optax.Schedule
     eval_info: dict
 
+
 train_state = TrainState(
     rng_key=rng_key,
     config=cfg,
@@ -186,12 +187,14 @@ At this point we assume there exists a `train_step` function that takes `(idx, t
 ```python
 train_state_params, train_state_static = eqx.partition(train_state, eqx.is_array)
 
+
 @functools.partial(jax.jit, donate_argnums=(1,))
 def train_step_wrapper(idx: int, state_params):
     state = eqx.combine(state_params, train_state_static)
     state = train_step(idx, state)
     state_params, _ = eqx.partition(state, eqx.is_array)
     return state_params
+
 
 train_state_params = jax.lax.fori_loop(
     lower=0,
@@ -223,14 +226,14 @@ rng_key, sample_traj_key = jax.random.split(train_state.rng_key)
 policy_params, policy_static = eqx.partition(train_state.model, eqx.is_array)
 cur_epsilon = train_state.exploration_schedule(idx)
 
+
 def fwd_policy_fn(rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params):
     policy = eqx.combine(policy_params, policy_static)
     policy_outputs = jax.vmap(policy, in_axes=(0,))(env_obs)
     do_explore = jax.random.bernoulli(rng_key, cur_epsilon, shape=(env_obs.shape[0],))
-    forward_logits = jnp.where(
-        do_explore[..., jnp.newaxis], 0, policy_outputs["forward_logits"]
-    )
+    forward_logits = jnp.where(do_explore[..., jnp.newaxis], 0, policy_outputs["forward_logits"])
     return forward_logits, policy_outputs
+
 
 traj_data, log_info = gfnx.utils.forward_rollout(
     rng_key=sample_traj_key,
@@ -282,9 +285,7 @@ def loss_fn(model: MLPPolicy) -> chex.Array:
 
     next_policy_outputs = jax.vmap(model, in_axes=(0,))(transitions.next_obs)
     bwd_logits = next_policy_outputs["backward_logits"]
-    next_bwd_invalid_mask = env.get_invalid_backward_mask(
-        transitions.next_state, env_params
-    )
+    next_bwd_invalid_mask = env.get_invalid_backward_mask(transitions.next_state, env_params)
     bwd_all_log_probs = jax.nn.log_softmax(
         bwd_logits, where=jnp.logical_not(next_bwd_invalid_mask), axis=-1
     )

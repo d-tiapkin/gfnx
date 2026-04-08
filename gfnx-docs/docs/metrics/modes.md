@@ -39,8 +39,10 @@ params = env.init(jax.random.PRNGKey(0))
 
 mode_states = env.get_ground_truth_sampling(jax.random.PRNGKey(1), 128, params)
 
+
 def grid_distance(lhs_state, rhs_state):
     return jnp.linalg.norm(lhs_state.state - rhs_state.state)
+
 
 metrics = gfnx.metrics.AccumulatedModesMetricsModule(
     env=env,
@@ -53,7 +55,9 @@ state = metrics.init(jax.random.PRNGKey(2), metrics.InitArgs(modes=mode_states))
 state = metrics.update(
     state,
     jax.random.PRNGKey(3),
-    metrics.UpdateArgs(states=trajectory.final_env_state),  # terminal states collected from your sampler
+    metrics.UpdateArgs(
+        states=trajectory.final_env_state
+    ),  # terminal states collected from your sampler
 )
 
 scores = metrics.get(state)

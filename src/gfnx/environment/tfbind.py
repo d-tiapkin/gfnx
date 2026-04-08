@@ -4,7 +4,7 @@ import chex
 import jax
 import jax.numpy as jnp
 
-from ..base import TRewardModule
+from ..base import BaseRewardModule, TRewardParams
 from ..utils import NUCLEOTIDES, NUCLEOTIDES_FULL_ALPHABET
 from .sequence import (
     EnvParams,
@@ -14,11 +14,10 @@ from .sequence import (
 
 
 class TFBind8Environment(FixedAutoregressiveSequenceEnvironment):
-    def __init__(self, reward_module: TRewardModule) -> None:
+    def __init__(self) -> None:
         self.char_to_id = {char: i for i, char in enumerate(NUCLEOTIDES_FULL_ALPHABET)}
 
         super().__init__(
-            reward_module,
             max_length=8,
             nchar=len(NUCLEOTIDES),
             ntoken=len(NUCLEOTIDES_FULL_ALPHABET),
@@ -37,31 +36,34 @@ class TFBind8Environment(FixedAutoregressiveSequenceEnvironment):
         """Environment name."""
         return "TFBind8-v0"
 
-    def _get_states_rewards(self, env_params: EnvParams) -> chex.Array:
+    def _get_states_rewards(
+        self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
+    ) -> chex.Array:
         """
-        Returns the true distribution of rewards for all states in the hypergrid.
+        Returns the true distribution of rewards for all states.
         """
         rewards = jnp.zeros((self.nchar,) * self.max_length, dtype=jnp.float32)
 
         def update_rewards(idx: int, rewards: chex.Array):
-            state = jnp.unravel_index(idx, shape=rewards.shape)  # Unpack index to state
+            state = jnp.unravel_index(idx, shape=rewards.shape)
             env_state = EnvState(
                 tokens=jnp.array(state),
-                is_terminal=True,
-                is_initial=False,
-                is_pad=False,
+                is_terminal=jnp.bool_(True),
+                is_initial=jnp.bool_(False),
+                is_pad=jnp.bool_(False),
             )
-            batched_env_state = jax.tree.map(lambda x: jnp.expand_dims(x, 0), env_state)
-            reward = self.reward_module.reward(batched_env_state, env_params)
-            return rewards.at[state].set(reward[0])
+            reward = reward_module.reward(env_state, reward_params)
+            return rewards.at[state].set(reward)
 
         return jax.lax.fori_loop(0, self.nchar**self.max_length, update_rewards, rewards)
 
-    def get_true_distribution(self, env_params: EnvParams) -> chex.Array:
+    def get_true_distribution(
+        self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
+    ) -> chex.Array:
         """
-        Returns the true distribution of rewards for all states in the hypergrid.
+        Returns the true distribution of rewards for all states.
         """
-        rewards = self._get_states_rewards(env_params)
+        rewards = self._get_states_rewards(env_params, reward_module, reward_params)
         return rewards / rewards.sum()
 
     def get_empirical_distribution(self, states: EnvState, env_params: EnvParams) -> chex.Array:
@@ -84,12 +86,13 @@ class TFBind8Environment(FixedAutoregressiveSequenceEnvironment):
         """Whether this environment supports mean reward tractability."""
         return True
 
-    def get_mean_reward(self, env_params: EnvParams) -> float:
+    def get_mean_reward(
+        self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
+    ) -> float:
         """
-        Returns the mean reward for the hypergrid environment.
-        The mean reward is computed as the sum of rewards divided by the number of states.
+        Returns the mean reward.
         """
-        rewards = self._get_states_rewards(env_params)
+        rewards = self._get_states_rewards(env_params, reward_module, reward_params)
         return jnp.pow(rewards, 2).sum() / rewards.sum()
 
     @property
@@ -97,12 +100,13 @@ class TFBind8Environment(FixedAutoregressiveSequenceEnvironment):
         """Whether this environment supports tractable normalizing constant."""
         return True
 
-    def get_normalizing_constant(self, env_params: EnvParams) -> float:
+    def get_normalizing_constant(
+        self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
+    ) -> float:
         """
-        Returns the normalizing constant for the hypergrid environment.
-        The normalizing constant is computed as the sum of rewards.
+        Returns the normalizing constant.
         """
-        rewards = self._get_states_rewards(env_params)
+        rewards = self._get_states_rewards(env_params, reward_module, reward_params)
         return rewards.sum()
 
     @property
@@ -111,7 +115,12 @@ class TFBind8Environment(FixedAutoregressiveSequenceEnvironment):
         return True
 
     def get_ground_truth_sampling(
-        self, rng_key: chex.PRNGKey, batch_size: int, env_params: EnvParams
+        self,
+        rng_key: chex.PRNGKey,
+        batch_size: int,
+        env_params: EnvParams,
+        reward_module: BaseRewardModule,
+        reward_params: TRewardParams,
     ) -> EnvState:
         """
         Returns a batch of terminal states sampled from the ground-truth distribution
@@ -125,7 +134,7 @@ class TFBind8Environment(FixedAutoregressiveSequenceEnvironment):
         Returns:
             EnvState with shape [batch_size, max_length].
         """
-        true_distribution = self.get_true_distribution(env_params)
+        true_distribution = self.get_true_distribution(env_params, reward_module, reward_params)
         flat_distribution = true_distribution.flatten()
 
         sampled_indices = jax.random.choice(

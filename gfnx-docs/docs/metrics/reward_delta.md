@@ -58,7 +58,9 @@ state = mean_metric.init(jax.random.PRNGKey(1), mean_metric.InitArgs())
 state = mean_metric.update(
     state,
     jax.random.PRNGKey(2),
-    mean_metric.UpdateArgs(log_rewards=batch_rewards),  # batch_rewards <- log rewards from your sampler
+    mean_metric.UpdateArgs(
+        log_rewards=batch_rewards
+    ),  # batch_rewards <- log rewards from your sampler
 )
 
 scores = mean_metric.get(state)

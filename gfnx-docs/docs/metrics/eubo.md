@@ -46,6 +46,7 @@ policy_params = {
     "backward_num_actions": env.backward_action_space.n,
 }
 
+
 def uniform_backward_policy(rng_key, obs, policy_params):
     batch = obs.shape[0]
     backward_logits = jnp.zeros((batch, policy_params["backward_num_actions"]), dtype=jnp.float32)

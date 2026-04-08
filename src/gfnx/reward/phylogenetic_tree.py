@@ -49,35 +49,27 @@ class PhyloTreeRewardModule(BaseRewardModule[PhyloTreeEnvState, PhyloTreeEnvPara
         return jax.lax.scan(compute_mutations, 0.0, jnp.arange(2 * self.num_nodes - 1))[0]
 
     def delta_score(self, state: PhyloTreeEnvState) -> TReward:
-        """Compute delta score"""
-
-        def _single_delta_score(state):
-            mutations = jnp.sum(
-                state.sequences[state.left_child[state.length - 1]]
-                & state.sequences[state.right_child[state.length - 1]]
-                == 0
-            )
-            return (self.C / self.num_nodes - mutations) / self.scale
-
-        return jax.vmap(_single_delta_score)(state)
+        """Compute delta score for a single state."""
+        mutations = jnp.sum(
+            state.sequences[state.left_child[state.length - 1]]
+            & state.sequences[state.right_child[state.length - 1]]
+            == 0
+        )
+        return (self.C / self.num_nodes - mutations) / self.scale
 
     def log_reward(
         self,
         state: PhyloTreeEnvState,
-        env_params: PhyloTreeEnvParams,
+        reward_params,
     ) -> TLogReward:
-        """Compute log reward: (C - total_mutations) / scale"""
-
-        def _single_log_reward(state):
-            total_mutations = self._get_mutations(state)
-            return (self.C - total_mutations) / self.scale
-
-        return jax.vmap(_single_log_reward)(state)
+        """Compute log reward for a single state: (C - total_mutations) / scale"""
+        total_mutations = self._get_mutations(state)
+        return (self.C - total_mutations) / self.scale
 
     def reward(
         self,
         state: PhyloTreeEnvState,
-        env_params: PhyloTreeEnvParams,
+        reward_params,
     ) -> TReward:
-        """Compute reward: exp((C - total_mutations) / scale)"""
-        return jnp.exp(self.log_reward(state, env_params))
+        """Compute reward for a single state: exp((C - total_mutations) / scale)"""
+        return jnp.exp(self.log_reward(state, reward_params))

@@ -6,12 +6,12 @@ import jax.numpy as jnp
 from jaxtyping import Array, Bool
 
 from gfnx.base import (
+    BaseEnvironment,
     BaseEnvParams,
     BaseEnvState,
-    BaseVecEnvironment,
+    BaseRewardModule,
     TAction,
     TDone,
-    TRewardModule,
     TRewardParams,
 )
 
@@ -21,87 +21,68 @@ from ..utils.dag import adj_to_index, construct_all_dags, get_all_adjacencies_fl
 
 @chex.dataclass(frozen=True)
 class EnvState(BaseEnvState):
-    adjacency_matrix: Bool[Array, " batch_size num_variables num_variables"]
-    closure_T: Bool[Array, " batch_size num_variables num_variables"]
-    is_terminal: Bool[Array, " batch_size"]
-    is_initial: Bool[Array, " batch_size"]
-    is_pad: Bool[Array, " batch_size"]
+    adjacency_matrix: Bool[Array, " num_variables num_variables"]
+    closure_T: Bool[Array, " num_variables num_variables"]
+    is_terminal: Bool[Array, ""]
+    is_initial: Bool[Array, ""]
+    is_pad: Bool[Array, ""]
 
 
 @chex.dataclass(frozen=True)
 class EnvParams(BaseEnvParams):
     num_variables: int = 4
-    reward_params: TRewardParams
 
 
-class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
+class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
     def __init__(
         self,
-        reward_module: TRewardModule,
         num_variables: int,
     ) -> None:
-        super().__init__(reward_module)
         self.num_variables = num_variables
         self.stop_action = self.num_variables * self.num_variables
 
         if self.is_enumerable:
-            # Here we construct a helper array to convert an adjacency matrix to an index.
-            # This is done during initialization to avoid repetitive computations.
+            # Helper array to convert adjacency matrix to index — computed once at init.
             self.all_adjacencies_flat_bits = get_all_adjacencies_flat_bits(self.num_variables)
             self.all_dags_num = self.all_adjacencies_flat_bits.shape[0]
 
-    def get_init_state(self, num_envs: int) -> EnvState:
+    def get_init_state(self) -> EnvState:
         return EnvState(
             adjacency_matrix=jnp.zeros(
-                (num_envs, self.num_variables, self.num_variables),
+                (self.num_variables, self.num_variables),
                 dtype=jnp.bool,
             ),
-            closure_T=jnp.tile(
-                jnp.eye(self.num_variables, dtype=jnp.bool),
-                (num_envs, 1, 1),
-            ),
-            is_terminal=jnp.zeros((num_envs,), dtype=jnp.bool),
-            is_initial=jnp.ones((num_envs,), dtype=jnp.bool),
-            is_pad=jnp.zeros((num_envs,), dtype=jnp.bool),
+            closure_T=jnp.eye(self.num_variables, dtype=jnp.bool),
+            is_terminal=jnp.bool_(False),
+            is_initial=jnp.bool_(True),
+            is_pad=jnp.bool_(False),
         )
 
     def init(self, rng_key: chex.PRNGKey) -> EnvParams:
-        dummy_state = self.get_init_state(1)
-        reward_params = self.reward_module.init(rng_key, dummy_state)
-        return EnvParams(
-            num_variables=self.num_variables,
-            reward_params=reward_params,
-        )
+        return EnvParams(num_variables=self.num_variables)
 
     @property
     def max_steps_in_episode(self) -> int:
         return (self.num_variables * (self.num_variables - 1)) // 2 + 1
 
-    def _single_transition(
+    def _transition(
         self,
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
     ) -> tuple[EnvState, TDone, dict[Any, Any]]:
-        is_terminal = state.is_terminal
+        done = action == self.stop_action
+        source, target = jnp.divmod(action, self.num_variables)
 
-        def get_state_terminal() -> EnvState:
-            return state.replace(is_pad=True)
-
-        def get_state_nonterminal() -> EnvState:
-            done = action == self.stop_action
-            source, target = jnp.divmod(action, self.num_variables)
-            return jax.lax.cond(done, get_state_finished, get_state_inter, source, target)
-
-        def get_state_finished(source: chex.Array, target: chex.Array) -> EnvState:
+        def get_state_finished(_s: chex.Array, _t: chex.Array) -> EnvState:
             return state.replace(is_terminal=True, is_initial=False)
 
-        def get_state_inter(source: chex.Array, target: chex.Array) -> EnvState:
-            adjacency_matrix = state.adjacency_matrix.at[source, target].set(True)
+        def get_state_inter(s: chex.Array, t: chex.Array) -> EnvState:
+            adjacency_matrix = state.adjacency_matrix.at[s, t].set(True)
             closure_T = state.closure_T
             outer_product = jnp.logical_and(
-                jnp.expand_dims(closure_T[source], 0),
-                jnp.expand_dims(closure_T[:, target], 1),
+                jnp.expand_dims(closure_T[s], 0),
+                jnp.expand_dims(closure_T[:, t], 1),
             )
             closure_T = jnp.logical_or(closure_T, outer_product)
             return state.replace(
@@ -111,29 +92,25 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
                 is_initial=False,
             )
 
-        next_state = jax.lax.cond(is_terminal, get_state_terminal, get_state_nonterminal)
-
+        next_active = jax.lax.cond(done, get_state_finished, get_state_inter, source, target)
+        next_pad = state.replace(is_pad=True)
+        next_state = jax.tree.map(
+            lambda p, a: jnp.where(state.is_terminal, p, a), next_pad, next_active
+        )
         return next_state, next_state.is_terminal, {}
 
     def _single_source_bfs(self, adjacency_t: chex.Array, start: int) -> chex.Array:
-        """
-        Returns a boolean 1D array 'visited' of shape (d,),
-        indicating which nodes are reachable from 'start' in adjacency_t.
-
-        adjacency_t[i, j] = True means there's an edge i->j in G^T.
-        """
+        """BFS from `start` in graph with adjacency matrix `adjacency_t`."""
         d = adjacency_t.shape[0]
         visited_init = jnp.zeros(d, dtype=bool).at[start].set(True)
         frontier_init = visited_init
 
         def cond_fun(carry):
             frontier, _visited = carry
-            return jnp.any(frontier)  # continue while we have newly discovered nodes
+            return jnp.any(frontier)
 
         def body_fun(carry):
             frontier, visited = carry
-            # adjacency_t & frontier[:, None] marks edges from any node in `frontier`.
-            # Taking "any(..., axis=0)" merges them into which nodes we can discover next
             neighbors = jnp.any(adjacency_t & frontier[:, None], axis=0)
             new_frontier = neighbors & jnp.logical_not(visited)
             new_visited = visited | new_frontier
@@ -143,33 +120,18 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         return visited_final
 
     def _single_compute_closure(self, adjacency: chex.Array) -> chex.Array:
-        """
-        Given the adjacency matrix of G (shape (d, d)),
-        compute its transitive closure via BFS-from-each-node.
-        closure[i, j] = True if i can reach j in the graph G.
-        """
+        """Transitive closure of graph via BFS from each node."""
         d = adjacency.shape[0]
         closure = jax.vmap(lambda i: self._single_source_bfs(adjacency, i))(jnp.arange(d))
-        # Force the diagonal True (i can reach i by convention)
         return jnp.logical_or(closure, jnp.eye(d, dtype=jnp.bool))
 
-    def _single_backward_transition(
+    def _backward_transition(
         self,
         state: EnvState,
         backward_action: chex.Array,
         env_params: EnvParams,
-    ) -> tuple[chex.Array, EnvState, chex.Array, chex.Array, dict[Any, Any]]:
-        """Backward transition for DAG environment.
-        Removing an edge is equivalent to adding a 'phantom' edge.
-        """
-        is_initial = state.is_initial
-
-        def get_state_initial() -> EnvState:
-            return state.replace(is_pad=True)
-
-        def get_state_non_initial() -> EnvState:
-            unterminate = backward_action == self.stop_action
-            return jax.lax.cond(unterminate, get_state_terminating, get_state_inter)
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
+        unterminate = backward_action == self.stop_action
 
         def get_state_terminating() -> EnvState:
             return state.replace(
@@ -190,7 +152,11 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
                 is_pad=False,
             )
 
-        prev_state = jax.lax.cond(is_initial, get_state_initial, get_state_non_initial)
+        non_initial = jax.lax.cond(unterminate, get_state_terminating, get_state_inter)
+        init_pad = state.replace(is_pad=True)
+        prev_state = jax.tree.map(
+            lambda p, n: jnp.where(state.is_initial, p, n), init_pad, non_initial
+        )
         return prev_state, prev_state.is_initial, {}
 
     def get_obs(self, state: EnvState, env_params: EnvParams) -> chex.Array:
@@ -198,52 +164,42 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
 
     def get_backward_action(
         self,
-        state: EnvState,
+        _state: EnvState,
         forward_action: chex.Array,
-        next_state: EnvState,
-        params: EnvParams,
+        _next_state: EnvState,
+        _params: EnvParams,
     ) -> chex.Array:
         return forward_action
 
     def get_forward_action(
         self,
-        state: EnvState,
+        _state: EnvState,
         backward_action: chex.Array,
-        prev_state: EnvState,
-        params: EnvParams,
+        _prev_state: EnvState,
+        _params: EnvParams,
     ) -> chex.Array:
         return backward_action
 
     def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        """Invalid mask for forward actions.
-        Constructed as a logical or of adjacency matrix and
-        transitive closure of transposed adjacency matrix.
-        """
-        num_envs = state.is_pad.shape[0]
-        mask = jnp.logical_or(state.adjacency_matrix, state.closure_T).reshape(num_envs, -1)
+        """Invalid mask for forward actions (single state). [N*N+1]"""
+        mask = jnp.logical_or(state.adjacency_matrix, state.closure_T).reshape(-1)
         return jnp.concatenate(
-            [mask, jnp.zeros((num_envs, 1), dtype=jnp.bool)], axis=1
-        )  # stop action == last action is always valid
+            [mask, jnp.zeros((1,), dtype=jnp.bool)], axis=0
+        )  # stop action is always valid
 
-    def get_invalid_backward_mask(self, state: EnvState, params: EnvParams) -> chex.Array:
-        """Invalid mask for backward actions.
-        Invert adjacency matrix and allow stop action only for the terminal state.
-        """
-
-        def _single_get_invalid_backward_mask(state: EnvState) -> chex.Array:
-            return jax.lax.cond(
-                state.is_terminal,
-                lambda: jnp.append(
-                    jnp.ones((self.num_variables**2,), dtype=jnp.bool),
-                    jnp.zeros((1,), dtype=jnp.bool),
-                ),
-                lambda: jnp.append(
-                    jnp.logical_not(state.adjacency_matrix).reshape(-1),
-                    jnp.ones((1,), dtype=jnp.bool),
-                ),
-            )
-
-        return jax.vmap(_single_get_invalid_backward_mask)(state)
+    def get_invalid_backward_mask(self, state: EnvState, _params: EnvParams) -> chex.Array:
+        """Invalid mask for backward actions (single state). [N*N+1]"""
+        return jax.lax.cond(
+            state.is_terminal,
+            lambda: jnp.append(
+                jnp.ones((self.num_variables**2,), dtype=jnp.bool),
+                jnp.zeros((1,), dtype=jnp.bool),
+            ),
+            lambda: jnp.append(
+                jnp.logical_not(state.adjacency_matrix).reshape(-1),
+                jnp.ones((1,), dtype=jnp.bool),
+            ),
+        )
 
     @property
     def name(self) -> str:
@@ -251,17 +207,14 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
 
     @property
     def action_space(self) -> spaces.Discrete:
-        """Action space of the environment."""
         return spaces.Discrete(self.num_variables * self.num_variables + 1)
 
     @property
     def backward_action_space(self) -> spaces.Discrete:
-        """Backward action space of the environment."""
         return spaces.Discrete(self.num_variables * self.num_variables + 1)
 
     @property
     def observation_space(self) -> spaces.Box:
-        """Observation space of the environment."""
         return spaces.Box(
             low=0,
             high=1,
@@ -271,7 +224,6 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
 
     @property
     def state_space(self) -> spaces.Dict:
-        """State space of the environment."""
         return spaces.Dict({
             "adjacency_matrix": spaces.Box(
                 low=0,
@@ -292,14 +244,13 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
 
     @property
     def is_enumerable(self) -> bool:
-        """Whether this environment supports enumerable operations."""
         return self.num_variables < 6
 
     def state_to_index(self, state: EnvState, env_params: EnvParams) -> chex.Array:
         return adj_to_index(state.adjacency_matrix, self.all_adjacencies_flat_bits)
 
     def get_all_states(self, env_params: EnvParams) -> EnvState:
-        """Returns all states in the environment in some order."""
+        """Returns all DAG states (batched — this method is inherently batch-returning)."""
         all_adjacency_matrices = construct_all_dags(self.num_variables)
         sort_idx = jax.vmap(adj_to_index, in_axes=(0, None))(
             all_adjacency_matrices, self.all_adjacencies_flat_bits
@@ -309,33 +260,28 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             lambda x: EnvState(
                 adjacency_matrix=x,
                 closure_T=self._single_compute_closure(x.T),
-                is_terminal=False,
-                is_initial=False,
-                is_pad=False,
+                is_terminal=jnp.bool_(False),
+                is_initial=jnp.bool_(False),
+                is_pad=jnp.bool_(False),
             )
         )(all_adjacency_matrices)
 
-    def _get_states_rewards(self, env_params: EnvParams) -> chex.Array:
-        """
-        Returns the true distribution of rewards for all states in the DAG environment.
-        NOTE: The rewards are shifted since log rewards are ~-100.
-        """
+    def _get_states_rewards(
+        self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
+    ) -> chex.Array:
         all_dags = self.get_all_states(env_params)
-        log_reward = self.reward_module.log_reward(all_dags, env_params)
+        log_reward = jax.vmap(reward_module.log_reward, in_axes=(0, None))(all_dags, reward_params)
         log_reward = log_reward - jnp.max(log_reward)  # softmax trick
         return jnp.exp(log_reward)
 
-    def get_true_distribution(self, env_params: EnvParams) -> chex.Array:
-        """
-        Returns the true distribution of rewards for all states in the DAG environment.
-        """
-        rewards = self._get_states_rewards(env_params)
+    def get_true_distribution(
+        self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
+    ) -> chex.Array:
+        rewards = self._get_states_rewards(env_params, reward_module, reward_params)
         return rewards / rewards.sum()
 
     def get_empirical_distribution(self, states: EnvState, env_params: EnvParams) -> chex.Array:
-        """
-        Extracts the empirical distribution from the given states.
-        """
+        """Extracts empirical distribution from a batch of states."""
         sample_idx = jax.vmap(adj_to_index, in_axes=(0, None))(
             states.adjacency_matrix, self.all_adjacencies_flat_bits
         )
@@ -344,30 +290,24 @@ class DAGEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
             valid_mask, sample_idx, num_segments=self.all_dags_num
         )
         empirical_dist /= empirical_dist.sum()
-
         return empirical_dist
 
     @property
     def is_mean_reward_tractable(self) -> bool:
-        """Whether this environment supports mean reward tractability."""
         return self.num_variables < 6
 
-    def get_mean_reward(self, env_params: EnvParams) -> float:
-        """
-        Returns the mean reward for the DAG environment.
-        """
-        rewards = self._get_states_rewards(env_params)
+    def get_mean_reward(
+        self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
+    ) -> float:
+        rewards = self._get_states_rewards(env_params, reward_module, reward_params)
         return jnp.pow(rewards, 2).sum() / rewards.sum()
 
     @property
     def is_normalizing_constant_tractable(self) -> bool:
-        """Whether this environment supports tractable normalizing constant."""
         return self.num_variables < 6
 
-    def get_normalizing_constant(self, env_params: EnvParams) -> float:
-        """
-        Returns the normalizing constant for the DAG environment.
-        The normalizing constant is computed as the sum of rewards.
-        """
-        rewards = self._get_states_rewards(env_params)
+    def get_normalizing_constant(
+        self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
+    ) -> float:
+        rewards = self._get_states_rewards(env_params, reward_module, reward_params)
         return rewards.sum()

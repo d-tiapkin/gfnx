@@ -54,15 +54,10 @@ class BitseqRewardModule(BaseRewardModule[BitseqEnvState, BitseqEnvParams]):
         distances = jax.vmap(lambda ms: hamming_distance(s, ms))(mode_set)
         return jnp.min(distances)
 
-    def log_reward(self, state: BitseqEnvState, env_params: BitseqEnvParams) -> TLogReward:
-        def single_log_reward(tokens: chex.Array, reward_params: TRewardParams):
-            bitseq = detokenize(tokens, self.k)
-            mode_dist = self._mode_set_distance(bitseq, reward_params["mode_set"])
-            return -self.reward_exponent * mode_dist.astype(jnp.float32) / bitseq.shape[0]
+    def log_reward(self, state: BitseqEnvState, reward_params: TRewardParams) -> TLogReward:
+        bitseq = detokenize(state.tokens, self.k)
+        mode_dist = self._mode_set_distance(bitseq, reward_params["mode_set"])
+        return -self.reward_exponent * mode_dist.astype(jnp.float32) / bitseq.shape[0]
 
-        return jax.vmap(single_log_reward, in_axes=(0, None))(
-            state.tokens, env_params.reward_params
-        )
-
-    def reward(self, state: BitseqEnvState, env_params: BitseqEnvParams) -> TReward:
-        return jnp.exp(self.log_reward(state, env_params))
+    def reward(self, state: BitseqEnvState, reward_params: TRewardParams) -> TReward:
+        return jnp.exp(self.log_reward(state, reward_params))

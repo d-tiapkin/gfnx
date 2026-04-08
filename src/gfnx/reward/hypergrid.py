@@ -4,14 +4,11 @@ import chex
 import jax.numpy as jnp
 
 from ..base import BaseRewardModule, TLogReward, TReward
-from ..environment import (
-    HypergridEnvParams,
-    HypergridEnvState,
-)
+from ..environment import HypergridEnvParams, HypergridEnvState
 
 
 class GeneralHypergridRewardModule(BaseRewardModule[HypergridEnvState, HypergridEnvParams]):
-    def __init__(self, R0: float = 1e-3, R1: float = 0.5, R2: float = 2.0):
+    def __init__(self, R0: float = 1e-3, R1: float = 0.5, R2: float = 2.0, side: int = 20):
         r"""
         General reward function for hypegrids, defined as
         $$
@@ -26,32 +23,29 @@ class GeneralHypergridRewardModule(BaseRewardModule[HypergridEnvState, Hypergrid
         self.R0 = R0
         self.R1 = R1
         self.R2 = R2
+        self.side = side
         self.min_reward = 1e-6  # TODO: Make this a parameter
 
     def init(self, rng_key: chex.PRNGKey, dummy_state: HypergridEnvState) -> None:
         return None  # No parameters needed to jit
 
-    def reward(self, state: HypergridEnvState, env_params: HypergridEnvParams) -> TReward:
-        state = state.state
-        ax = jnp.abs(state / (env_params.side - 1) - 0.5)
+    def reward(self, state: HypergridEnvState, reward_params) -> TReward:
+        ax = jnp.abs(state.state / (self.side - 1) - 0.5)
         reward = (
-            self.R0
-            + jnp.prod((ax > 0.25), axis=-1) * self.R1
-            + jnp.prod((ax < 0.4) * (ax > 0.3), axis=-1) * self.R2
+            self.R0 + jnp.prod(ax > 0.25) * self.R1 + jnp.prod((ax < 0.4) * (ax > 0.3)) * self.R2
         )
-        chex.assert_shape(reward, (state.shape[0],))  # [B]
         return jnp.clip(reward, min=self.min_reward)
 
-    def log_reward(self, state: HypergridEnvState, env_params: HypergridEnvParams) -> TLogReward:
-        return jnp.log(self.reward(state, env_params))
+    def log_reward(self, state: HypergridEnvState, reward_params) -> TLogReward:
+        return jnp.log(self.reward(state, reward_params))
 
 
 # Two specific use cases
 class EasyHypergridRewardModule(GeneralHypergridRewardModule):
-    def __init__(self) -> None:
-        super().__init__(R0=1e-3, R1=0.5, R2=2.0)
+    def __init__(self, side: int = 20) -> None:
+        super().__init__(R0=1e-3, R1=0.5, R2=2.0, side=side)
 
 
 class HardHypergridRewardModule(GeneralHypergridRewardModule):
-    def __init__(self) -> None:
-        super().__init__(R0=1e-4, R1=1.0, R2=3.0)
+    def __init__(self, side: int = 20) -> None:
+        super().__init__(R0=1e-4, R1=1.0, R2=3.0, side=side)
