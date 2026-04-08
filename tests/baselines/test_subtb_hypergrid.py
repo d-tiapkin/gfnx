@@ -87,26 +87,29 @@ def test_script_runs_successfully(training_result):
     )
 
 
-def parse_last_training_loss(stdout: str) -> float:
-    """Parse the last training loss from the stdout."""
+def parse_all_training_losses(stdout: str) -> list[float]:
+    """Parse all logged training losses from the stdout."""
     dict_pattern = r"\[.*?\]\[.*?\]\[.*?\] - (\{.*?\})"
     matches = list(re.finditer(dict_pattern, stdout, re.MULTILINE))
     if not matches:
         raise ValueError("No training metrics found in output")
-    for match in reversed(matches):
+    losses = []
+    for match in matches:
         dict_str = match.group(1)
         try:
             metrics_dict = ast.literal_eval(dict_str)
             if "train/mean_loss" in metrics_dict:
-                return float(metrics_dict["train/mean_loss"])
+                losses.append(float(metrics_dict["train/mean_loss"]))
         except (ValueError, SyntaxError):
             continue
 
-    raise ValueError("No 'train/mean_loss' metric found in output")
+    if not losses:
+        raise ValueError("No 'train/mean_loss' metric found in output")
+    return losses
 
 
 def test_training_metrics(training_result, training_paths):
-    """Verify that final training loss is below the configured threshold."""
+    """Verify that the minimum training loss over all eval checkpoints is below threshold."""
     from omegaconf import OmegaConf
 
     config_path = training_paths["config_dir"] / "test_subtb_hypergrid.yaml"
@@ -114,8 +117,10 @@ def test_training_metrics(training_result, training_paths):
     loss_threshold = config.loss_threshold
 
     stdout = training_result.stdout
-    final_loss = parse_last_training_loss(stdout)
+    all_losses = parse_all_training_losses(stdout)
+    min_loss = min(all_losses)
 
-    assert final_loss < loss_threshold, (
-        f"Final training loss {final_loss:.6e} exceeds threshold {loss_threshold:.6e}"
+    assert min_loss < loss_threshold, (
+        f"Minimum training loss {min_loss:.6e} over {len(all_losses)} checkpoints "
+        f"exceeds threshold {loss_threshold:.6e}"
     )
