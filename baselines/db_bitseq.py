@@ -241,7 +241,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         update_args=train_state.metrics_module.UpdateArgs(
             metrics_args={
                 "modes": AccumulatedModesMetricsModule.UpdateArgs(
-                    states=final_env_state,
+                    states=final_states,
                 ),
             }
         ),

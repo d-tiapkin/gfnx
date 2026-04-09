@@ -161,7 +161,6 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     log_rewards = jax.vmap(train_state.reward_module.log_reward, in_axes=(0, None))(
         final_states, train_state.reward_params
     )
-    final_env_state = aux_info["final_env_state"]
     # Compute the RL reward / ELBO (for logging purposes)
     log_pb_traj = jax.vmap(
         lambda td: gfnx.utils.forward_trajectory_log_probs(env, td, env_params)
@@ -253,10 +252,6 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     new_logZ = eqx.apply_updates(train_state.logZ, updates["logZ"])
 
     # Perform all the required updates of metrics
-    transitions = jax.tree.map(
-        lambda x: x.reshape((-1,) + x.shape[2:]),
-        jax.vmap(gfnx.utils.split_traj_to_transitions)(traj_data),
-    )
     rng_key, eval_rng_key = jax.random.split(rng_key)
 
     # Perform all the required logging

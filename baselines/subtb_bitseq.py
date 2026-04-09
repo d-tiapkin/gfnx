@@ -277,10 +277,6 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     new_model = eqx.apply_updates(train_state.model, updates)
 
     # Perform all the required updates of metrics
-    transitions = jax.tree.map(
-        lambda x: x.reshape((-1,) + x.shape[2:]),
-        jax.vmap(gfnx.utils.split_traj_to_transitions)(traj_data),
-    )
     rng_key, eval_rng_key = jax.random.split(rng_key)
 
     metrics_state, eval_info = train_state.metrics_module.step(
