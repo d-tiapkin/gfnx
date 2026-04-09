@@ -92,6 +92,7 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
         metrics: list[str],
         env: TEnvironment,
         fwd_policy_fn: TPolicyFn,
+        reward_module,
         batch_size: int,
         tol_epsilon: float = 1e-7,
     ):
@@ -106,6 +107,7 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
                 choose from {"tv", "kl", "jsd", "2d_marginal_distribution"}.
             env: Enumerable environment for which to compute metrics.
             fwd_policy_fn: Forward policy function for generating trajectories.
+            reward_module: Reward module used to compute the true distribution.
             batch_size: Batch size used when evaluating policy over states.
             tol_epsilon: Tolerance for convergence in distribution computation.
 
@@ -126,6 +128,7 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
         self.metrics = metrics
         self.env = env
         self.fwd_policy_fn = fwd_policy_fn
+        self.reward_module = reward_module
         self.batch_size = batch_size
         self.tol_epsilon = tol_epsilon
 
@@ -136,9 +139,11 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
         Attributes:
             env_params: Environment parameters used to obtain the true distribution
                 and query environment functions.
+            reward_params: Reward parameters passed to ``get_true_distribution``.
         """
 
         env_params: TEnvParams
+        reward_params: Any
 
     def init(self, rng_key: chex.PRNGKey, args: InitArgs) -> ExactDistributionMetricsState:
         """Initialize the metric state.
@@ -149,14 +154,16 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
 
         Args:
             rng_key: JAX PRNG key (currently unused).
-            args: Initialization arguments containing environment parameters.
+            args: Initialization arguments containing environment and reward parameters.
 
         Returns:
             ExactDistributionMetricsState: Initialized state containing:
                 - true_distribution: Ground truth distribution from the environment
                 - exact_distribution: Initial uniform distribution
         """
-        true_distribution = self.env.get_true_distribution(args.env_params)
+        true_distribution = self.env.get_true_distribution(
+            args.env_params, self.reward_module, args.reward_params
+        )
         exact_distribution = jnp.ones_like(true_distribution) / true_distribution.size
         return ExactDistributionMetricsState(
             true_distribution=true_distribution,
@@ -216,7 +223,7 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
         num_states = transition.shape[0] // 2
 
         initial_vector = jnp.zeros((2 * num_states,))
-        initial_state = jax.tree_map(lambda x: x[0], self.env.get_init_state(1))
+        initial_state = self.env.get_init_state()
         initial_idx = self.env.state_to_index(initial_state, args.env_params)
         initial_vector = initial_vector.at[initial_idx].set(1.0)
 
@@ -274,10 +281,12 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
             rng_key = carry
             rng_key, subkey = jax.random.split(rng_key)
 
-            obs_batch = self.env.get_obs(states_batch, env_params)
-            invalid_mask_batch = self.env.get_invalid_mask(states_batch, env_params)
+            obs_batch = jax.vmap(self.env.get_obs, in_axes=(0, None))(states_batch, env_params)
+            invalid_mask_batch = self.env.get_invalid_mask_batch(states_batch, env_params)
 
-            fwd_policy_logits, _ = self.fwd_policy_fn(subkey, obs_batch, policy_params)
+            fwd_policy_logits, _ = jax.vmap(
+                lambda obs: self.fwd_policy_fn(subkey, obs, policy_params)
+            )(obs_batch)
             fwd_policy_probs = jax.nn.softmax(
                 fwd_policy_logits, axis=-1, where=jnp.logical_not(invalid_mask_batch)
             )
@@ -299,7 +308,7 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
         actions = jnp.arange(self.env.action_space.n)  # [num_actions]
 
         next_state, is_terminal, _ = jax.vmap(
-            jax.vmap(self.env._single_transition, in_axes=(None, 0, None)), in_axes=(0, None, None)
+            jax.vmap(self.env._transition, in_axes=(None, 0, None)), in_axes=(0, None, None)
         )(all_states, actions, env_params)
         next_state_idx = jax.vmap(
             jax.vmap(self.env.state_to_index, in_axes=(0, None)), in_axes=(0, None)

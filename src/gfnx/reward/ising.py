@@ -20,15 +20,15 @@ class IsingRewardModule(BaseRewardModule[IsingEnvState, IsingEnvParams]):
         J = jnp.zeros((dim, dim))
         return IsingRewardParams(J=J)
 
-    def reward(self, state: IsingEnvState, env_params: IsingEnvParams) -> TReward:
-        return jnp.exp(self.log_reward(state, env_params))
+    def reward(self, state: IsingEnvState, reward_params: IsingRewardParams) -> TReward:
+        return jnp.exp(self.log_reward(state, reward_params))
 
-    def log_reward(self, state: IsingEnvState, env_params: IsingEnvParams) -> TLogReward:
+    def log_reward(self, state: IsingEnvState, reward_params: IsingRewardParams) -> TLogReward:
         """Compute log reward for Ising model states.
 
         Args:
         - state: IsingEnvState with state field of shape [B, dim] containing values in {0, 1}
-        - env_params: Environment parameters containing reward_params with alpha and J
+        - reward_params: IsingRewardParams containing J matrix
 
         Returns:
         - Log reward tensor of shape [B] for each state in the batch
@@ -40,5 +40,5 @@ class IsingRewardModule(BaseRewardModule[IsingEnvState, IsingEnvParams]):
         The log reward is simply -E, so higher energy states have lower reward.
         """
         canonical = 2 * state.state - 1
-        J = env_params.reward_params.J
-        return jnp.einsum("bi,ij,bj->b", canonical, J, canonical)
+        J = reward_params.J
+        return jnp.einsum("i,ij,j->", canonical, J, canonical)

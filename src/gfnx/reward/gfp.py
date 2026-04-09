@@ -61,16 +61,14 @@ class EqxProxyGFPRewardModule(BaseRewardModule[GFPEnvState, GFPEnvParams]):
 
         return {"model_params": model_params}
 
-    def log_reward(self, state: GFPEnvState, env_params: GFPEnvParams) -> TLogReward:
-        return jnp.log(self.reward(state, env_params))
+    def log_reward(self, state: GFPEnvState, reward_params: TRewardParams) -> TLogReward:
+        return jnp.log(self.reward(state, reward_params))
 
-    def reward(self, state: GFPEnvState, env_params: GFPEnvParams) -> TReward:
+    def reward(self, state: GFPEnvState, reward_params: TRewardParams) -> TReward:
         # Lazy imports to avoid importing equinox in the main module
         import equinox as eqx
 
-        model = eqx.combine(env_params.reward_params["model_params"], self.model_static)
-        reward = jax.vmap(lambda x: model(x, enable_dropout=False, key=None))(state.tokens)
+        model = eqx.combine(reward_params["model_params"], self.model_static)
+        reward = model(state.tokens, enable_dropout=False, key=None)
         reward = jnp.clip(reward + self.offset, min=self.min_reward)
-        reward = reward.squeeze(axis=-1)
-        chex.assert_shape(reward, (state.tokens.shape[0],))  # [B]
-        return reward
+        return reward.squeeze()

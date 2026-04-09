@@ -76,7 +76,7 @@ class ApproxDistributionMetricsModule(BaseMetricsModule):
         - "2d_marginal_distribution": Marginal distribution computation
 
     Attributes:
-        metrics: List of metric names to compute, 
+        metrics: List of metric names to compute,
             choose from {"tv", "kl", "jsd", "2d_marginal_distribution"}.
         env: Enumerable environment for which to compute metrics.
         buffer_size: Maximum number of states to store in the replay buffer.
@@ -93,6 +93,7 @@ class ApproxDistributionMetricsModule(BaseMetricsModule):
         self,
         metrics: list[str],
         env: TEnvironment,
+        reward_module,
         buffer_size: int = 1000,
     ):
         """Initialize the distribution metrics module.
@@ -127,6 +128,7 @@ class ApproxDistributionMetricsModule(BaseMetricsModule):
 
         self.metrics = metrics
         self.env = env
+        self.reward_module = reward_module
 
         self.buffer_module = fbx.make_item_buffer(
             max_length=buffer_size,
@@ -142,9 +144,11 @@ class ApproxDistributionMetricsModule(BaseMetricsModule):
         Attributes:
             env_params: Environment parameters needed to obtain the true distribution
                 and initialize environment states for the replay buffer.
+            reward_params: Reward parameters passed to get_true_distribution.
         """
 
         env_params: TEnvParams
+        reward_params: Any
 
     def init(self, rng_key: chex.PRNGKey, args: InitArgs) -> ApproxDistributionMetricsState:
         """Initialize the metric state for distribution metrics.
@@ -163,11 +167,12 @@ class ApproxDistributionMetricsModule(BaseMetricsModule):
                 - empirical_distribution: Initial uniform distribution
                 - replay_buffer: Empty buffer ready to collect states
         """
-        _, fake_state = self.env.reset(1, args.env_params)
-        fake_single_state = jax.tree.map(lambda x: x[0], fake_state)
+        _, fake_single_state = self.env.reset(args.env_params)
         # Replay buffer takes only shapes, but not values
         replay_buffer_state = self.buffer_module.init(fake_single_state)
-        true_distribution = self.env.get_true_distribution(args.env_params)
+        true_distribution = self.env.get_true_distribution(
+            args.env_params, self.reward_module, args.reward_params
+        )
         return ApproxDistributionMetricsState(
             true_distribution=true_distribution,
             empirical_distribution=jnp.ones_like(true_distribution) / true_distribution.size,

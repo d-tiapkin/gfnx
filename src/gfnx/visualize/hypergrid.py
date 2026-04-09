@@ -150,7 +150,6 @@ class HypergridRenderer(BaseRenderer[EnvState]):
             zorder=3,
         )
 
-
     def _remove_artists(self, artists: list[matplotlib.artist.Artist]):
         """Remove matplotlib artists from the plot."""
         for artist in artists:

@@ -45,7 +45,7 @@ params = env.init(jax.random.PRNGKey(0))
 obs, state = env.reset(num_envs=1, env_params=params)
 
 # 4. Take a forward step:
-# action / 2^k corresponds to the position with empty word, 
+# action / 2^k corresponds to the position with empty word,
 # action mod 2^k corresponds to the k-bit word to put in its place.
 action = jnp.array([0], dtype=jnp.int32)
 obs, state, log_reward, done, _ = env.step(state, action, params)
@@ -135,7 +135,7 @@ reward_module = gfnx.EqxProxyAMPRewardModule(
     proxy_config_path="proxy/configs/amp.yaml",
     pretrained_proxy_path="proxy/weights/amp/model",
     reward_exponent=1.0,
-    min_reward=1e-6
+    min_reward=1e-6,
 )
 
 # 2. Create an environment and initialize it
@@ -179,7 +179,7 @@ reward_module = gfnx.EqxProxyGFPRewardModule(
     proxy_config_path="proxy/configs/dummy_gfp.yaml",
     pretrained_proxy_path="proxy/weights/dummy_gfp/model",
     reward_exponent=1.0,
-    min_reward=1e-6
+    min_reward=1e-6,
 )
 
 # 2. Create an environment and initialize it

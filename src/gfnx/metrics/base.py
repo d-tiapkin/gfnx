@@ -22,13 +22,11 @@ class MetricsState:
     """
 
 
-
 class BaseInitArgs(ABC):
     """
     Base class for argument containers passed as `args` to the `init` method
     of metric modules.
     """
-
 
 
 class BaseUpdateArgs(ABC):
@@ -38,13 +36,11 @@ class BaseUpdateArgs(ABC):
     """
 
 
-
 class BaseProcessArgs(ABC):
     """
     Base class for argument containers passed as `args` to the `process` method
     of metric modules.
     """
-
 
 
 # Some helper classes for empty arguments cases
@@ -55,17 +51,14 @@ class EmptyInitArgs(BaseInitArgs):
     """Empty initialization arguments for metrics that do not require any parameters."""
 
 
-
 @chex.dataclass
 class EmptyUpdateArgs(BaseUpdateArgs):
     """Empty update arguments for metrics that do not require any parameters."""
 
 
-
 @chex.dataclass
 class EmptyProcessArgs(BaseProcessArgs):
     """Empty process arguments for metrics that do not require any parameters."""
-
 
 
 TMetricsState = TypeVar("TMetricsState", bound=MetricsState)
@@ -207,6 +200,50 @@ class BaseMetricsModule(ABC, Generic[TInitArgs, TUpdateArgs, TProcessArgs, TMetr
             NotImplementedError: Must be implemented by subclasses
         """
         raise NotImplementedError
+
+    def step(
+        self,
+        idx: int,
+        metrics_state: TMetricsState,
+        rng_key: chex.PRNGKey,
+        update_args: TUpdateArgs,
+        process_args: TProcessArgs,
+        eval_each: int,
+        num_train_steps: int,
+        prev_eval_info: dict[str, Any],
+    ) -> tuple[TMetricsState, dict[str, Any]]:
+        """Combined update + conditional process + get.
+
+        Runs update every step, then conditionally runs process and get on eval steps.
+
+        Args:
+            idx: Current training step index.
+            metrics_state: Current metric state.
+            rng_key: PRNG key passed to update and process.
+            update_args: Arguments forwarded to update().
+            process_args: Arguments forwarded to process().
+            eval_each: Frequency of evaluation steps.
+            num_train_steps: Total number of training steps (used to trigger final eval).
+            prev_eval_info: Previous eval_info dict, returned unchanged on non-eval steps.
+
+        Returns:
+            Tuple of (new_metrics_state, eval_info).
+        """
+        metrics_state = self.update(metrics_state, rng_key=rng_key, args=update_args)
+        is_eval_step = (idx % eval_each == 0) | (idx + 1 == num_train_steps)
+        metrics_state = jax.lax.cond(
+            is_eval_step,
+            lambda kwargs: self.process(**kwargs),
+            lambda kwargs: kwargs["metrics_state"],
+            {"metrics_state": metrics_state, "rng_key": rng_key, "args": process_args},
+        )
+        eval_info = jax.lax.cond(
+            is_eval_step,
+            lambda ms: self.get(ms),
+            lambda ms: prev_eval_info,
+            metrics_state,
+        )
+        return metrics_state, eval_info
 
 
 @chex.dataclass

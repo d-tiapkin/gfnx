@@ -10,7 +10,6 @@ performance tips when running on GPU, i.e., XLA flags.
 
 """
 
-import functools
 import logging
 import os
 from typing import NamedTuple
@@ -22,7 +21,6 @@ import jax
 import jax.numpy as jnp
 import jraph
 import optax
-from jax_tqdm import loop_tqdm
 from omegaconf import OmegaConf
 from utils.checkpoint import save_checkpoint
 from utils.logger import Writer
@@ -294,6 +292,8 @@ class TrainState(NamedTuple):
     opt_state: optax.OptState
     metrics_module: MultiMetricsModule
     metrics_state: MultiMetricsState
+    reward_module: gfnx.DAGRewardModule
+    reward_params: chex.Array
 
 
 @eqx.filter_jit
@@ -312,36 +312,43 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     # Define the policy function suitable for gfnx.utils.forward_rollout
     def fwd_policy_fn(rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params) -> chex.Array:
         policy = eqx.combine(policy_params, policy_static)
-        policy_outputs = policy(env_obs)
+        # GNNPolicy expects a batch dimension: unsqueeze, call, then squeeze
+        policy_outputs = jax.tree.map(lambda x: x.squeeze(0), policy(env_obs[None]))
         logits = policy_outputs["forward_logits"]
 
         # Apply the exploration schedule
         rng_key, exploration_key = jax.random.split(rng_key)
-        batch_size = logits.shape[0]
-        exploration_mask = jax.random.bernoulli(exploration_key, cur_eps, (batch_size,))
-        logits = jnp.where(exploration_mask[..., None], 0, logits)
+        do_explore = jax.random.bernoulli(exploration_key, cur_eps)
+        logits = jnp.where(do_explore, 0, logits)
         policy_outputs = eqx.tree_at(lambda x: x["forward_logits"], policy_outputs, logits)
         return logits, policy_outputs
 
     # Generating the trajectory and splitting it into transitions
-    traj_data, log_info = gfnx.utils.forward_rollout(
-        rng_key=sample_traj_key,
-        num_envs=num_envs,
-        policy_fn=fwd_policy_fn,
-        policy_params=policy_params,
-        env=train_state.env,
-        env_params=train_state.env_params,
+    rng_keys = jax.random.split(sample_traj_key, num_envs)
+    traj_data, final_states, info = jax.vmap(
+        lambda rng: gfnx.utils.forward_rollout(
+            rng, fwd_policy_fn, policy_params, train_state.env, train_state.env_params
+        )
+    )(rng_keys)
+    transitions = jax.tree.map(
+        lambda x: x.reshape((-1,) + x.shape[2:]),
+        jax.vmap(gfnx.utils.split_traj_to_transitions)(traj_data),
     )
-    transitions = gfnx.utils.split_traj_to_transitions(traj_data)
-    bwd_actions = train_state.env.get_backward_action(
+    bwd_actions = train_state.env.get_backward_action_batch(
         transitions.state,
         transitions.action,
         transitions.next_state,
         train_state.env_params,
     )
+    # Compute rewards for terminal states
+    log_rewards = jax.vmap(train_state.reward_module.log_reward, in_axes=(0, None))(
+        final_states, train_state.reward_params
+    )
     # Compute the RL reward / ELBO (for logging purposes)
-    _, log_pb_traj = gfnx.utils.forward_trajectory_log_probs(env, traj_data, env_params)
-    rl_reward = log_pb_traj + log_info["log_gfn_reward"] + log_info["entropy"]
+    log_pb_traj = jax.vmap(
+        lambda td: gfnx.utils.forward_trajectory_log_probs(env, td, env_params)
+    )(traj_data)[1]
+    rl_reward = log_pb_traj + log_rewards + info["entropy"]
 
     # Step 2. Compute the loss
     def loss_fn(model: GNNPolicy) -> chex.Array:
@@ -349,7 +356,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         policy_outputs = model(transitions.obs)
         # Compute the forward log-probs
         fwd_logits = policy_outputs["forward_logits"]
-        invalid_mask = env.get_invalid_mask(transitions.state, env_params)
+        invalid_mask = env.get_invalid_mask_batch(transitions.state, env_params)
         masked_fwd_logits = gfnx.utils.mask_logits(fwd_logits, invalid_mask)
         fwd_all_log_probs = jax.nn.log_softmax(masked_fwd_logits, axis=-1)
         sink_logprobs = fwd_all_log_probs[:, -1]
@@ -362,23 +369,24 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         # Compute the stats for the next state
         next_policy_outputs = train_state.target_model(transitions.next_obs)
         next_fwd_logits = next_policy_outputs["forward_logits"]
-        next_fwd_invalid_mask = env.get_invalid_mask(transitions.next_state, env_params)
+        next_fwd_invalid_mask = env.get_invalid_mask_batch(transitions.next_state, env_params)
         masked_next_fwd_logits = gfnx.utils.mask_logits(next_fwd_logits, next_fwd_invalid_mask)
         next_fwd_all_log_probs = jax.nn.log_softmax(masked_next_fwd_logits, axis=-1)
         next_sink_logprobs = next_fwd_all_log_probs[:, -1]
 
         bwd_logits = next_policy_outputs["backward_logits"]
-        next_bwd_invalid_mask = env.get_invalid_backward_mask(transitions.next_state, env_params)
-        masked_bwd_logits = gfnx.utils.mask_logits(bwd_logits, next_bwd_invalid_mask)
-        bwd_all_log_probs = jax.nn.log_softmax(masked_bwd_logits, axis=-1)
-        bwd_logprobs = jnp.take_along_axis(
-            bwd_all_log_probs, jnp.expand_dims(bwd_actions, axis=-1), axis=-1
-        ).squeeze(-1)
-        delta_score = env.reward_module.delta_score(
+        next_bwd_invalid_mask = env.get_invalid_backward_mask_batch(
+            transitions.next_state, env_params
+        )
+        bwd_logprobs = gfnx.utils.compute_action_log_probs(
+            bwd_logits, bwd_actions, next_bwd_invalid_mask
+        )
+        delta_score = train_state.reward_module.delta_score(
             transitions.state,
             transitions.action,
             transitions.next_state,
             env_params,
+            train_state.reward_params,
         )
 
         # Compute the MDB loss with masking
@@ -386,7 +394,6 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         error = next_sink_logprobs + fwd_logprobs - sink_logprobs - bwd_logprobs - delta_score
         error = jnp.where(done_or_pad, 0.0, error)
         return optax.huber_loss(error).sum() / jnp.logical_not(done_or_pad).sum()
-
 
     mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(train_state.model)
     # Step 3. Update the model with grads
@@ -431,18 +438,22 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
                     "reward_corr": TestCorrelationMetricsModule.ProcessArgs(
                         policy_params=model_params,
                         env_params=train_state.env_params,
+                        reward_params=train_state.reward_params,
                     ),
                     "edge_corr": TestCorrelationMetricsModule.ProcessArgs(
                         policy_params=model_params,
                         env_params=train_state.env_params,
+                        reward_params=train_state.reward_params,
                     ),
                     "path_corr": TestCorrelationMetricsModule.ProcessArgs(
                         policy_params=model_params,
                         env_params=train_state.env_params,
+                        reward_params=train_state.reward_params,
                     ),
                     "markov_blanket_corr": TestCorrelationMetricsModule.ProcessArgs(
                         policy_params=model_params,
                         env_params=train_state.env_params,
+                        reward_params=train_state.reward_params,
                     ),
                 }
             ),
@@ -470,10 +481,10 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         idx,
         {
             "mean_loss": mean_loss,
-            "entropy": log_info["entropy"].mean(),
+            "entropy": info["entropy"].mean(),
             "grad_norm": optax.tree_utils.tree_l2_norm(grads),
-            "mean_reward": jnp.exp(log_info["log_gfn_reward"]).mean(),
-            "mean_log_reward": log_info["log_gfn_reward"].mean(),
+            "mean_reward": jnp.exp(log_rewards).mean(),
+            "mean_log_reward": log_rewards.mean(),
             "rl_reward": rl_reward.mean(),
         },
         metrics_state,
@@ -542,10 +553,10 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     # Initialize the environment and its inner parameters
     env = gfnx.environment.DAGEnvironment(
-        reward_module,
         num_variables=cfg.environment.num_variables,
     )
     env_params = env.init(env_init_key)
+    reward_params = reward_module.init(env_init_key, env.get_init_state())
 
     rng_key, net_init_key = jax.random.split(rng_key)
     # Initialize the network
@@ -623,6 +634,7 @@ def run_experiment(cfg: OmegaConf) -> None:
             metrics=["tv", "kl", "jsd"],
             env=env,
             fwd_policy_fn=fwd_policy_fn,
+            reward_module=reward_module,
             batch_size=cfg.metrics.batch_size,
         ),
         "reward_corr": TestCorrelationMetricsModule(
@@ -673,23 +685,27 @@ def run_experiment(cfg: OmegaConf) -> None:
         metrics_module.InitArgs(
             metrics_args={
                 "exact_distribution": ExactDistributionMetricsModule.InitArgs(
-                    env_params=env_params
+                    env_params=env_params, reward_params=reward_params
                 ),
                 "reward_corr": TestCorrelationMetricsModule.InitArgs(
                     env_params=env_params,
                     test_set=test_set_states,
+                    reward_params=reward_params,
                 ),
                 "edge_corr": TestCorrelationMetricsModule.InitArgs(
                     env_params=env_params,
                     test_set=test_set_states,
+                    reward_params=reward_params,
                 ),
                 "path_corr": TestCorrelationMetricsModule.InitArgs(
                     env_params=env_params,
                     test_set=test_set_states,
+                    reward_params=reward_params,
                 ),
                 "markov_blanket_corr": TestCorrelationMetricsModule.InitArgs(
                     env_params=env_params,
                     test_set=test_set_states,
+                    reward_params=reward_params,
                 ),
             }
         ),
@@ -707,19 +723,9 @@ def run_experiment(cfg: OmegaConf) -> None:
         opt_state=opt_state,
         metrics_module=metrics_module,
         metrics_state=metrics_state,
+        reward_module=reward_module,
+        reward_params=reward_params,
     )
-    # Split train state into parameters and static parts to make jit work.
-    train_state_params, train_state_static = eqx.partition(train_state, eqx.is_array)
-
-    @functools.partial(jax.jit, donate_argnums=(1,))
-    @loop_tqdm(cfg.num_train_steps, print_rate=cfg.logging["tqdm_print_rate"])
-    def train_step_wrapper(idx: int, train_state_params):
-        # Wrapper to use a usual jit in jax, since it is required by fori_loop.
-        train_state = eqx.combine(train_state_params, train_state_static)
-        train_state = train_step(idx, train_state)
-        train_state_params, _ = eqx.partition(train_state, eqx.is_array)
-        return train_state_params
-
     if cfg.logging.use_writer:
         log.info("Initialize writer")
         log_dir = (
@@ -740,17 +746,9 @@ def run_experiment(cfg: OmegaConf) -> None:
         )
 
     log.info("Start training")
-    # Run the training loop via jax.lax.fori_loop
-    train_state_params = jax.lax.fori_loop(
-        lower=0,
-        upper=cfg.num_train_steps,
-        body_fun=train_step_wrapper,
-        init_val=train_state_params,
+    train_state = gfnx.utils.run_training_loop(
+        train_step, train_state, cfg.num_train_steps, cfg.logging["tqdm_print_rate"]
     )
-    jax.block_until_ready(train_state_params)
-
-    # Save the final model
-    train_state = eqx.combine(train_state_params, train_state_static)
     dir = (
         cfg.logging.checkpoint_dir
         if cfg.logging.checkpoint_dir

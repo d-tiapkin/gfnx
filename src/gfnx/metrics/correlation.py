@@ -6,7 +6,7 @@ import chex
 import jax
 import jax.numpy as jnp
 
-from ..base import TEnvironment, TEnvParams, TEnvState
+from ..base import TEnvironment, TEnvParams, TEnvState, TRewardModule, TRewardParams
 from ..utils.corr import pearson_corr, spearman_corr
 from ..utils.rollout import (
     TPolicyFn,
@@ -69,6 +69,7 @@ class BaseCorrelationMetricsModule(BaseMetricsModule):
     def __init__(
         self,
         env: TEnvironment,
+        reward_module: TRewardModule,
         bwd_policy_fn: TPolicyFn,
         n_rounds: int,
         batch_size: int = 1,
@@ -78,6 +79,7 @@ class BaseCorrelationMetricsModule(BaseMetricsModule):
 
         Args:
             env: Environment for trajectory generation and reward computation
+            reward_module: Reward module for log reward computation
             bwd_policy_fn: Backward policy function for trajectory probability estimation
             n_rounds: Number of sampling rounds for averaging log-ratios
             batch_size: Batch size for processing terminal states
@@ -85,6 +87,7 @@ class BaseCorrelationMetricsModule(BaseMetricsModule):
                 to an arbitrary domain size for correlation computation
         """
         self.env = env
+        self.reward_module = reward_module
         self.bwd_policy_fn = bwd_policy_fn
         self.n_rounds = n_rounds
         self.batch_size = batch_size
@@ -109,12 +112,14 @@ class BaseCorrelationMetricsModule(BaseMetricsModule):
         Attributes:
             policy_params: Current policy parameters used for trajectory generation,
                 backward trajectory sampling, and log-ratio computation.
-            env_params: Environment parameters required for trajectory generation,
-                reward computation, and rollout operations.
+            env_params: Environment parameters required for trajectory generation
+                and rollout operations.
+            reward_params: Current reward parameters used for log reward computation.
         """
 
         policy_params: TPolicyParams
         env_params: TEnvParams
+        reward_params: TRewardParams
 
     def process(
         self,
@@ -244,17 +249,16 @@ class BaseCorrelationMetricsModule(BaseMetricsModule):
         def process_batch(rng_key, terminal_states):
             """Process a single batch of terminal states."""
             rng_key, rollout_key = jax.random.split(rng_key)
-            bwd_traj_data, _ = backward_rollout(
-                rng_key=rollout_key,
-                init_state=terminal_states,
-                policy_fn=self.bwd_policy_fn,
-                policy_params=policy_params,
-                env=self.env,
-                env_params=env_params,
-            )
-            log_pf_traj, log_pb_traj = backward_trajectory_log_probs(
-                self.env, bwd_traj_data, env_params
-            )
+            rng_keys_bwd = jax.random.split(rollout_key, self.batch_size)
+            bwd_traj_data, _, _ = jax.vmap(
+                lambda rng, s: backward_rollout(
+                    rng, s, self.bwd_policy_fn, policy_params, self.env, env_params
+                ),
+                in_axes=(0, 0),
+            )(rng_keys_bwd, terminal_states)
+            log_pf_traj, log_pb_traj = jax.vmap(
+                lambda td: backward_trajectory_log_probs(self.env, td, env_params)
+            )(bwd_traj_data)
             log_ratio_traj = log_pf_traj - log_pb_traj
             return rng_key, log_ratio_traj
 
@@ -365,7 +369,11 @@ class OnPolicyCorrelationMetricsModule(BaseCorrelationMetricsModule):
                 and zero-initialized arrays for rewards and log-ratios with shape
                 (domain_size,) representing the transformed probability space
         """
-        dummy_terminal_states = self.env.reset(self.n_terminal_states, args.env_params)[1]
+        dummy_state = self.env.get_init_state()
+        dummy_terminal_states = jax.tree.map(
+            lambda x: jnp.broadcast_to(x[None], (self.n_terminal_states,) + x.shape),
+            dummy_state,
+        )
         return CorrelationMetricsState(
             test_terminal_states=dummy_terminal_states,
             test_log_rewards_transformed=jnp.zeros(self.domain_size),
@@ -397,17 +405,16 @@ class OnPolicyCorrelationMetricsModule(BaseCorrelationMetricsModule):
                 - Transformed log-rewards corresponding to the terminal states
         """
         # First, generate fresh terminal states and rewards via forward rollouts
-        _, info = forward_rollout(
-            rng_key=rng_key,
-            num_envs=self.n_terminal_states,
-            policy_fn=self.fwd_policy_fn,
-            policy_params=args.policy_params,
-            env=self.env,
-            env_params=args.env_params,
-        )
+        rng_keys = jax.random.split(rng_key, self.n_terminal_states)
+        _, terminal_states, _ = jax.vmap(
+            lambda rng: forward_rollout(
+                rng, self.fwd_policy_fn, args.policy_params, self.env, args.env_params
+            )
+        )(rng_keys)
         # Second, extract the terminal states and log-rewards
-        terminal_states = info["final_env_state"]
-        log_rewards = info["log_gfn_reward"]
+        log_rewards = jax.vmap(self.reward_module.log_reward, in_axes=(0, None))(
+            terminal_states, args.reward_params
+        )
         log_rewards_transformed = self.transform_fn(terminal_states, log_rewards)
         # Third, return the terminal states and transformed log-rewards
         return terminal_states, log_rewards_transformed
@@ -432,10 +439,12 @@ class TestCorrelationMetricsModule(BaseCorrelationMetricsModule):
                 from the test set and for environment operations.
             test_set: Fixed set of terminal states that will be used consistently
                 for correlation evaluation across training iterations.
+            reward_params: Reward parameters used to compute log-rewards on the test set.
         """
 
         env_params: TEnvParams
         test_set: TEnvState
+        reward_params: TRewardParams
 
     def init(self, rng_key: chex.PRNGKey, args: InitArgs) -> CorrelationMetricsState:
         """Initialize metric state with a fixed test set.
@@ -453,7 +462,9 @@ class TestCorrelationMetricsModule(BaseCorrelationMetricsModule):
                 states, their computed transformed log-rewards, and zero-initialized
                 log-ratios with shape matching the transformed log-rewards
         """
-        test_log_rewards = self.env.reward_module.log_reward(args.test_set, args.env_params)
+        test_log_rewards = jax.vmap(self.reward_module.log_reward, in_axes=(0, None))(
+            args.test_set, args.reward_params
+        )
         test_log_rewards_transformed = self.transform_fn(args.test_set, test_log_rewards)
         return CorrelationMetricsState(
             test_terminal_states=args.test_set,

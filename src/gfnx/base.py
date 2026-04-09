@@ -8,7 +8,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float, Int
 
-TEnvironment = TypeVar("TEnvironment", bound="BaseVecEnvironment")
+TEnvironment = TypeVar("TEnvironment", bound="BaseEnvironment")
 TEnvParams = TypeVar("TEnvParams", bound="BaseEnvParams")
 
 TObs = chex.ArrayTree
@@ -25,29 +25,26 @@ TDone = chex.Array
 
 @chex.dataclass(frozen=True)
 class BaseEnvState:
-    is_terminal: Bool[Array, " batch_size"]
-    is_initial: Bool[Array, " batch_size"]
-    is_pad: Bool[Array, " batch_size"]
+    is_terminal: Bool[Array, ""]
+    is_initial: Bool[Array, ""]
+    is_pad: Bool[Array, ""]
 
 
 @chex.dataclass(frozen=True)
 class BaseEnvParams:
-    reward_params: TRewardParams
+    pass
 
 
 class BaseRewardModule(ABC, Generic[TEnvState, TEnvParams]):
     """
     Base class for reward and log reward implementations.
 
-    This class defines the interface for reward modules, which are
-    responsible for computing rewards and log rewards given the state of
-    the environment and its parameters.
-    Subclasses should implement the following methods:
-        - init: Initialize the reward module and return its parameters.
-        - log_reward: Compute the log reward given the state and environment
-          parameters.
-        - reward: Compute the reward given the state and environment
-          parameters.
+    Subclasses must implement:
+        - init: Initialize and return reward parameters.
+        - log_reward: Compute log reward for a single state.
+        - reward: Compute reward for a single state.
+
+    Use jax.vmap to apply over batches of states.
     """
 
     @abstractmethod
@@ -56,59 +53,56 @@ class BaseRewardModule(ABC, Generic[TEnvState, TEnvParams]):
         Initialize reward module, returns TRewardParams.
         Args:
         - rng_key: chex.PRNGKey, random key
-        - dummy_state: TEnvState, shape [B, ...], batch of dummy states
+        - dummy_state: TEnvState, a single dummy state (no batch dim)
         """
         raise NotImplementedError
 
     @abstractmethod
-    def log_reward(self, state: TEnvState, env_params: TEnvParams) -> Float[Array, " batch_size"]:
+    def log_reward(self, state: TEnvState, reward_params: TRewardParams) -> Float[Array, ""]:
         """
-        Compute the log reward given the state and environment parameters.
+        Compute the log reward for a single state.
         Args:
-        - state: TEnvState, shape [B, ...], batch of states
-        - env_params: TEnvParams, params of environment,
-          always includes reward params
+        - state: TEnvState, a single state (no batch dim)
+        - reward_params: TRewardParams, reward parameters
         Returns:
-        - TLogReward, shape [B, ...], batch of log rewards
+        - scalar log reward
         """
         raise NotImplementedError
 
     @abstractmethod
-    def reward(self, state: TEnvState, env_params: TEnvParams) -> Float[Array, " batch_size"]:
+    def reward(self, state: TEnvState, reward_params: TRewardParams) -> Float[Array, ""]:
         """
-        Log reward function, returns TReward
+        Compute the reward for a single state.
         Args:
-        - state: TEnvState, shape [B, ...], batch of states
-        - env_params: TEnvParams, params of environment,
-          always includes reward params
+        - state: TEnvState, a single state (no batch dim)
+        - reward_params: TRewardParams, reward parameters
         Returns:
-        - TReward, shape [B, ...], batch of rewards
+        - scalar reward
         """
         raise NotImplementedError
 
 
-class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
+class BaseEnvironment(ABC, Generic[TEnvState, TEnvParams]):
     """
-    Jittable abstract base class for all gfnx Environments.
-    Note: all environments are vectorized by default.
+    Abstract base class for all gfnx environments.
 
-    Args:
-    - reward_module: TRewardModule, reward module
+    All methods operate on a **single** state (no batch dimension).
+    Use jax.vmap externally to run multiple environments in parallel:
+
+        rng_keys = jax.random.split(rng_key, num_envs)
+        traj_data, final_states, info = jax.vmap(
+            lambda rng: forward_rollout(rng, policy_fn, policy_params, env, env_params)
+        )(rng_keys)
     """
-
-    def __init__(self, reward_module: TRewardModule):
-        self.reward_module = reward_module
 
     @abstractmethod
-    def get_init_state(self, num_envs: int) -> TEnvState:
-        """Returns batch of initial states of the environment."""
+    def get_init_state(self) -> TEnvState:
+        """Returns a single initial state of the environment (no batch dim)."""
         raise NotImplementedError
 
     @abstractmethod
     def init(self, rng_key: chex.PRNGKey) -> TEnvParams:
-        """
-        Init params of the environment and reward module.
-        """
+        """Init and return environment parameters."""
         raise NotImplementedError
 
     @property
@@ -118,96 +112,51 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
 
     def step(
         self, state: TEnvState, action: TAction, env_params: TEnvParams
-    ) -> tuple[TObs, TEnvState, TLogReward, TDone, dict[Any, Any]]:
-        """Performs batched step transitions in the environment."""
-        next_state, done, info = self.transition(state, action, env_params)
-        done = jnp.astype(done, jnp.bool)  # Ensure that done is boolean
-        # Compute reward only for a states that became terminal on this step
-        new_dones = jnp.logical_and(done, jnp.logical_not(state.is_terminal))
-
-        # Since computation of log rewards is expensive, we do it only if at
-        # least one of the environments is done
-        log_reward = jax.lax.cond(
-            jnp.any(new_dones),
-            self.reward_module.log_reward,
-            lambda state, _: jnp.zeros_like(state.is_pad, dtype=jnp.float32),
-            next_state,  # Args for log_reward
-            env_params,  # Args for log_reward
-        )
-        log_reward = jnp.where(new_dones, log_reward, jnp.zeros_like(log_reward))
-        return (
-            self.get_obs(next_state, env_params),
-            next_state,
-            log_reward,
-            done,
-            info,
-        )
+    ) -> tuple[TObs, TEnvState, TDone, dict[Any, Any]]:
+        """Performs a single-environment step transition."""
+        next_state, done, info = self._transition(state, action, env_params)
+        done = jnp.astype(done, jnp.bool)
+        return self.get_obs(next_state, env_params), next_state, done, info
 
     def backward_step(
         self,
         state: TEnvState,
         backward_action: TBackwardAction,
         env_params: TEnvParams,
-    ) -> tuple[TObs, TEnvState, TLogReward, TDone, dict[Any, Any]]:
+    ) -> tuple[TObs, TEnvState, TDone, dict[Any, Any]]:
         """
-        Performs batched backward step transitions in the environment.
-        Important: `done` is true if the state is the initial one.
+        Performs a single-environment backward step transition.
+        `done` is true when the state reaches the initial state.
         """
-        state, done, info = self.backward_transition(state, backward_action, env_params)
-        done = jnp.astype(done, jnp.bool)  # Ensure that done is boolean
-        # log reward is always zero for backward steps
-        log_rewards = jnp.zeros(state.is_pad.shape, dtype=jnp.float32)
-        return self.get_obs(state, env_params), state, log_rewards, done, info
+        prev_state, done, info = self._backward_transition(state, backward_action, env_params)
+        done = jnp.astype(done, jnp.bool)
+        return self.get_obs(prev_state, env_params), prev_state, done, info
 
-    def reset(self, num_envs: int, env_params: TEnvParams) -> tuple[TObs, TEnvState]:
-        """Performs batched resetting of environment."""
-        state = self.get_init_state(num_envs)
+    def reset(self, env_params: TEnvParams) -> tuple[TObs, TEnvState]:
+        """Returns observation and initial state for a single environment."""
+        state = self.get_init_state()
         return self.get_obs(state, env_params), state
 
-    def transition(
-        self, state: TEnvState, action: TAction, env_params: TEnvParams
-    ) -> tuple[TEnvState, TDone, dict[Any, Any]]:
-        """Environment-specific step transition."""
-        next_state, done, info = jax.vmap(self._single_transition, in_axes=(0, 0, None))(
-            state, action, env_params
-        )
-        return next_state, done, info
-
-    def backward_transition(
-        self,
-        state: TEnvState,
-        backward_action: TAction,
-        env_params: TEnvParams,
-    ) -> tuple[TEnvState, TDone, dict[Any, Any]]:
-        """Environment-specific step backward transition."""
-        prev_state, done, info = jax.vmap(self._single_backward_transition, in_axes=(0, 0, None))(
-            state, backward_action, env_params
-        )
-        return prev_state, done, info
-
     @abstractmethod
-    def _single_transition(
+    def _transition(
         self, state: TEnvState, action: TAction, env_params: TEnvParams
     ) -> tuple[TEnvState, TDone, dict[Any, Any]]:
-        """Environment-specific step transition. NOTE: this is not batched!"""
+        """Single-environment forward transition. Not batched."""
         raise NotImplementedError
 
     @abstractmethod
-    def _single_backward_transition(
+    def _backward_transition(
         self,
         state: TEnvState,
         backward_action: TAction,
         env_params: TEnvParams,
     ) -> tuple[TEnvState, TDone, dict[Any, Any]]:
-        """
-        Environment-specific step backward transition.
-        NOTE: this is not batched!
-        """
+        """Single-environment backward transition. Not batched."""
         raise NotImplementedError
 
     @abstractmethod
     def get_obs(self, state: TEnvState, env_params: TEnvParams) -> chex.ArrayTree:
-        """Applies observation function to state. Should be batched."""
+        """Returns observation for a single state (no batch dim)."""
         raise NotImplementedError
 
     @abstractmethod
@@ -218,10 +167,7 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         next_state: TEnvState,
         env_params: TEnvParams,
     ) -> chex.Array:
-        """
-        Returns backward action given the complete characterization of the
-        forward transition. Should be batched.
-        """
+        """Returns backward action for a single forward transition (not batched)."""
         raise NotImplementedError
 
     @abstractmethod
@@ -232,49 +178,75 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         prev_state: TEnvState,
         env_params: TEnvParams,
     ) -> chex.Array:
-        """
-        Returns forward action given the complete characterization of the
-        backward transition. Should be batched.
-        """
+        """Returns forward action for a single backward transition (not batched)."""
         raise NotImplementedError
 
     @abstractmethod
     def get_invalid_mask(
         self, state: TEnvState, env_params: TEnvParams
-    ) -> Bool[Array, " batch_size"]:
-        """Returns mask of invalid actions. Should be batched"""
+    ) -> Bool[Array, " n_actions"]:
+        """Returns mask of invalid forward actions for a single state. Not batched."""
         raise NotImplementedError
 
     @abstractmethod
     def get_invalid_backward_mask(
         self, state: TEnvState, env_params: TEnvParams
-    ) -> Bool[Array, " batch_size"]:
-        """Returns mask of invalid backward actions. Should be batched."""
+    ) -> Bool[Array, " n_bwd_actions"]:
+        """Returns mask of invalid backward actions for a single state. Not batched."""
         raise NotImplementedError
 
-    def sample_action(
-        self, rng_key: chex.PRNGKey, policy_logprobs: chex.Array
-    ) -> Int[Array, " batch_size"]:
-        """
-        Helping function for sampling actions from policy.
-        """
-        batch_size = policy_logprobs.shape[0]
-        action = jax.random.categorical(rng_key, policy_logprobs, axis=-1)
-        chex.assert_shape(action, (batch_size,))
-        return action
+    # ------------------------------------------------------------------
+    # Convenience batched methods (defined once here, not overridden).
+    # Use these in loss functions where states have a leading batch dim.
+    # ------------------------------------------------------------------
+
+    def get_invalid_mask_batch(
+        self, state: TEnvState, env_params: TEnvParams
+    ) -> Bool[Array, "batch_size n_actions"]:
+        """Batched get_invalid_mask for use in loss functions. state: [B, ...]"""
+        return jax.vmap(self.get_invalid_mask, in_axes=(0, None))(state, env_params)
+
+    def get_invalid_backward_mask_batch(
+        self, state: TEnvState, env_params: TEnvParams
+    ) -> Bool[Array, "batch_size n_bwd_actions"]:
+        """Batched get_invalid_backward_mask for use in loss functions. state: [B, ...]"""
+        return jax.vmap(self.get_invalid_backward_mask, in_axes=(0, None))(state, env_params)
+
+    def get_backward_action_batch(
+        self,
+        state: TEnvState,
+        forward_action: TAction,
+        next_state: TEnvState,
+        env_params: TEnvParams,
+    ) -> chex.Array:
+        """Batched get_backward_action for use in loss functions. All inputs: [B, ...]"""
+        return jax.vmap(self.get_backward_action, in_axes=(0, 0, 0, None))(
+            state, forward_action, next_state, env_params
+        )
+
+    def get_forward_action_batch(
+        self,
+        state: TEnvState,
+        backward_action: TAction,
+        prev_state: TEnvState,
+        env_params: TEnvParams,
+    ) -> chex.Array:
+        """Batched get_forward_action for use in loss functions. All inputs: [B, ...]"""
+        return jax.vmap(self.get_forward_action, in_axes=(0, 0, 0, None))(
+            state, backward_action, prev_state, env_params
+        )
+
+    def sample_action(self, rng_key: chex.PRNGKey, policy_logprobs: chex.Array) -> Int[Array, ""]:
+        """Sample a single action from policy logprobs. logprobs: [n_actions]"""
+        return jax.random.categorical(rng_key, policy_logprobs, axis=-1)
 
     def sample_backward_action(
         self,
         rng_key: chex.PRNGKey,
         policy_logprobs: chex.Array,
-    ) -> Int[Array, " batch_size"]:
-        """
-        Helping function for sampling backward actions from policy.
-        """
-        batch_size = policy_logprobs.shape[0]
-        action = jax.random.categorical(rng_key, policy_logprobs, axis=-1)
-        chex.assert_shape(action, (batch_size,))
-        return action
+    ) -> Int[Array, ""]:
+        """Sample a single backward action from policy logprobs. logprobs: [n_bwd_actions]"""
+        return jax.random.categorical(rng_key, policy_logprobs, axis=-1)
 
     @property
     @abstractmethod
@@ -291,7 +263,7 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
     @property
     @abstractmethod
     def backward_action_space(self):
-        """Action space of the environment."""
+        """Backward action space of the environment."""
         raise NotImplementedError
 
     @property
@@ -311,45 +283,31 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         """Whether this environment supports enumerable operations."""
         return False
 
-    # Additional methods for enumerable environments
-    def get_true_distribution(self, env_params: TEnvParams) -> chex.Array:
-        """
-        Returns the true distribution of rewards for all states if the
-        environment is enumerable.
-        Args:
-            env_params: TEnvParams, params of environment
-        Returns:
-            chex.Array, true distribution of rewards for all states
-        """
+    def get_true_distribution(
+        self, env_params: TEnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
+    ) -> chex.Array:
+        """Returns the true reward distribution over all states (enumerable envs only)."""
         if not self.is_enumerable:
             raise ValueError(f"Environment {self.name} is not enumerable")
         raise NotImplementedError
 
     def get_empirical_distribution(self, states: TEnvState, env_params: TEnvParams) -> chex.Array:
         """
-        Extracts the empirical distribution from the given states if the
-        environment is enumerable.
-        Args:
-            states: TEnvState, shape [B, ...], batch of states
-            env_params: TEnvParams, params of environment
-        Returns:
-            chex.Array, empirical distribution of rewards for all states
+        Extracts the empirical distribution from a batch of states.
+        states: [B, ...] — batched states (this method is naturally batched over states).
         """
         if not self.is_enumerable:
             raise ValueError(f"Environment {self.name} is not enumerable")
         raise NotImplementedError
 
     def get_all_states(self, env_params: TEnvParams) -> chex.Array:
-        """Returns a list of all states if this functionality is supported."""
+        """Returns all states if enumerable."""
         if not self.is_enumerable:
             raise ValueError(f"Environment {self.name} does not support getting all states")
         raise NotImplementedError
 
     def state_to_index(self, state: TEnvState, env_params: TEnvParams) -> chex.Array:
-        """
-        Converts a state to its corresponding index returned by `get_all_states` function
-        if this functionality is supported.
-        """
+        """Converts a single state to its index in get_all_states."""
         if not self.is_enumerable:
             raise ValueError(f"Environment {self.name} does not support getting all states")
         raise NotImplementedError
@@ -359,14 +317,10 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         """Whether this environment supports mean reward tractability."""
         return False
 
-    def get_mean_reward(self, env_params: TEnvParams) -> float:
-        """
-        Returns the mean reward over the true distribution.
-        Args:
-            env_params: TEnvParams, params of environment
-        Returns:
-           float, mean reward over the true distribution
-        """
+    def get_mean_reward(
+        self, env_params: TEnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
+    ) -> float:
+        """Returns the mean reward over the true distribution."""
         if not self.is_mean_reward_tractable:
             raise ValueError(f"Mean reward for environment {self.name} is not tractable")
         raise NotImplementedError
@@ -376,41 +330,42 @@ class BaseVecEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         """Whether this environment supports tractable normalizing constant."""
         return False
 
-    def get_normalizing_constant(self, env_params: TEnvParams) -> float:
-        """
-        Returns the normalizing constant for the hypergrid environment.
-        The normalizing constant is computed as the sum of rewards.
-        """
+    def get_normalizing_constant(
+        self, env_params: TEnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
+    ) -> float:
+        """Returns the normalizing constant (sum of rewards over all states)."""
         if not self.is_normalizing_constant_tractable:
             raise ValueError(f"Normalizing constant for environment {self.name} is not tractable")
         raise NotImplementedError
 
     @property
     def is_ground_truth_sampling_tractable(self) -> bool:
-        """Whether this environment supports tractable sampling from the GT distribution."""
+        """Whether this environment supports tractable GT distribution sampling."""
         return False
 
     def get_ground_truth_sampling(
-        self, rng_key: chex.PRNGKey, batch_size: int, env_params: TEnvParams
+        self,
+        rng_key: chex.PRNGKey,
+        batch_size: int,
+        env_params: TEnvParams,
+        reward_module: "BaseRewardModule",
+        reward_params: TRewardParams,
     ) -> TEnvState:
         """
-        Returns the ground truth sampling for the hypergrid environment.
-        The ground truth sampling is computed as the sum of rewards.
-        Args:
-            batch_size: int, number of samples to generate
-            env_params: TEnvParams, params of environment
-        Returns:
-            TEnvState, shape [batch_size, ...], batch of ground truth sampled states
+        Returns a batch of states sampled from the ground truth distribution.
+        Returns: TEnvState with leading batch dim [batch_size, ...]
         """
         if not self.is_ground_truth_sampling_tractable:
             raise ValueError(f"GT sampling for environment {self.name} is not tractable")
         raise NotImplementedError
 
 
+# Backward-compatibility alias
+BaseVecEnvironment = BaseEnvironment
+
+
 class BaseRenderer(ABC, Generic[TEnvState]):
-    """
-    Base class for rendering environments.
-    """
+    """Base class for rendering environments."""
 
     @abstractmethod
     def init_state(self, state: TEnvState):

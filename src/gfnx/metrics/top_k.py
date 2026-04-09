@@ -185,17 +185,14 @@ class TopKMetricsModule(BaseMetricsModule):
         Returns:
             TopKMetricsState: Updated state with computed top-K rewards and diversity statistics
         """
-        # Sample a batch of trajectory
-        _, info = forward_rollout(
-            rng_key,
-            num_envs=self.num_traj,
-            policy_fn=self.fwd_policy_fn,
-            policy_params=args.policy_params,
-            env=self.env,
-            env_params=args.env_params,
-        )
-        final_env_state = info["final_env_state"]
-        rewards = jnp.exp(info["log_gfn_reward"])
+        # Sample a batch of trajectories
+        rng_keys = jax.random.split(rng_key, self.num_traj)
+        traj_data, final_env_state, _ = jax.vmap(
+            lambda rng: forward_rollout(
+                rng, self.fwd_policy_fn, args.policy_params, self.env, args.env_params
+            )
+        )(rng_keys)
+        rewards = jnp.exp(traj_data.info["log_gfn_reward"].max(axis=-1))
         chex.assert_shape(rewards, (self.num_traj,))
         arg_sort_idx = jnp.argsort(rewards)
 

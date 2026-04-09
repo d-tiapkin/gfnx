@@ -7,32 +7,29 @@ from jaxtyping import Array, Bool, Int
 
 from .. import spaces
 from ..base import (
+    BaseEnvironment,
     BaseEnvParams,
     BaseEnvState,
-    BaseVecEnvironment,
     TAction,
     TDone,
-    TRewardModule,
 )
 
 
 @chex.dataclass(frozen=True)
 class EnvState(BaseEnvState):
-    state: Int[Array, " batch_size dim"]
-    time: Int[Array, " batch_size"]
-    is_terminal: Bool[Array, " batch_size"]
-    is_initial: Bool[Array, " batch_size"]
-    is_pad: Bool[Array, " batch_size"]
+    state: Int[Array, " dim"]
+    time: Int[Array, ""]
+    is_terminal: Bool[Array, ""]
+    is_initial: Bool[Array, ""]
+    is_pad: Bool[Array, ""]
 
 
 @chex.dataclass(frozen=True)
 class EnvParams(BaseEnvParams):
     dim: int = 10
 
-    reward_params: Any = None
 
-
-class IsingEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
+class IsingEnvironment(BaseEnvironment[EnvState, EnvParams]):
     """Ising environment for discrete energy-based models.
 
     This environment is based on the paper https://arxiv.org/pdf/2202.01361.pdf.
@@ -45,90 +42,69 @@ class IsingEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
     NOTE: There is no exit action; the environment terminates when all spins are set.
     """
 
-    def __init__(self, reward_module: TRewardModule, dim: int = 10) -> None:
-        super().__init__(reward_module)
+    def __init__(self, dim: int = 10) -> None:
         self.dim = dim
 
-    def get_init_state(self, num_envs: int) -> EnvState:
+    def get_init_state(self) -> EnvState:
         return EnvState(
-            # TODO: use int4 instead of int8
-            state=jnp.full((num_envs, self.dim), -1, dtype=jnp.int8),
-            time=jnp.zeros((num_envs,), dtype=jnp.int32),
-            is_terminal=jnp.zeros((num_envs,), dtype=jnp.bool),
-            is_initial=jnp.ones((num_envs,), dtype=jnp.bool),
-            is_pad=jnp.zeros((num_envs,), dtype=jnp.bool),
+            state=jnp.full((self.dim,), -1, dtype=jnp.int8),
+            time=jnp.int32(0),
+            is_terminal=jnp.bool_(False),
+            is_initial=jnp.bool_(True),
+            is_pad=jnp.bool_(False),
         )
 
     def init(self, rng_key: chex.PRNGKey) -> EnvParams:
-        dummy_state = self.get_init_state(1)
-        reward_params = self.reward_module.init(rng_key, dummy_state)
-        return EnvParams(dim=self.dim, reward_params=reward_params)
+        return EnvParams(dim=self.dim)
 
     @property
     def max_steps_in_episode(self) -> int:
         return self.dim
 
-    def _single_transition(
+    def _transition(
         self,
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
     ) -> tuple[EnvState, TDone, dict[Any, Any]]:
-        """
-        Environment-specific step forward transition.
-        """
-        is_terminal = state.is_terminal
-        time = state.time
-
-        def get_state_terminal() -> EnvState:
-            return state.replace(is_pad=True)
-
-        def get_state_nonterminal() -> EnvState:
-            spin_index = jnp.mod(action, self.dim)
-            spin_value = jnp.asarray(action // self.dim, dtype=jnp.int8)
-            new_state = state.state.at[spin_index].set(spin_value)
-            return state.replace(
-                state=new_state,
-                time=time + 1,
-                is_terminal=jnp.all(new_state != -1),
-                is_initial=False,
-                is_pad=False,
-            )
-
-        next_state = jax.lax.cond(is_terminal, get_state_terminal, get_state_nonterminal)
-
+        spin_index = jnp.mod(action, self.dim)
+        spin_value = jnp.asarray(action // self.dim, dtype=jnp.int8)
+        new_state_arr = state.state.at[spin_index].set(spin_value)
+        next_active = state.replace(
+            state=new_state_arr,
+            time=state.time + 1,
+            is_terminal=jnp.all(new_state_arr != -1),
+            is_initial=False,
+            is_pad=False,
+        )
+        next_pad = state.replace(is_pad=True)
+        next_state = jax.tree.map(
+            lambda p, a: jnp.where(state.is_terminal, p, a), next_pad, next_active
+        )
         return next_state, next_state.is_terminal, {}
 
-    def _single_backward_transition(
+    def _backward_transition(
         self,
         state: EnvState,
         backward_action: chex.Array,
         env_params: EnvParams,
-    ) -> tuple[chex.Array, EnvState, chex.Array, chex.Array, dict[Any, Any]]:
-        """
-        Environment-specific step backward transition. Rewards always zero!
-        """
-        is_initial = state.is_initial
-        time = state.time
-
-        def get_state_initial() -> EnvState:
-            return state.replace(is_pad=True)
-
-        def get_state_non_initial() -> EnvState:
-            prev_state = state.state.at[backward_action].set(-1)
-            return EnvState(
-                state=prev_state,
-                time=time - 1,
-                is_terminal=False,
-                is_initial=jnp.all(prev_state == -1),
-                is_pad=False,
-            )
-
-        prev_state = jax.lax.cond(is_initial, get_state_initial, get_state_non_initial)
+    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
+        prev_state_arr = state.state.at[backward_action].set(-1)
+        non_initial = EnvState(
+            state=prev_state_arr,
+            time=state.time - 1,
+            is_terminal=False,
+            is_initial=jnp.all(prev_state_arr == -1),
+            is_pad=False,
+        )
+        init_pad = state.replace(is_pad=True)
+        prev_state = jax.tree.map(
+            lambda p, n: jnp.where(state.is_initial, p, n), init_pad, non_initial
+        )
         return prev_state, prev_state.is_initial, {}
 
     def get_obs(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        """Returns the lattice partial assignment of spins."""
+        """Returns the lattice partial assignment of spins (single state)."""
         return state.state
 
     def get_backward_action(
@@ -138,7 +114,7 @@ class IsingEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         next_state: EnvState,
         params: EnvParams,
     ) -> chex.Array:
-        """Returns backward action given the forward transition."""
+        """Returns backward action given the forward transition (single)."""
         return jnp.mod(forward_action, self.dim)
 
     def get_forward_action(
@@ -148,28 +124,16 @@ class IsingEnvironment(BaseVecEnvironment[EnvState, EnvParams]):
         prev_state: EnvState,
         env_params: EnvParams,
     ) -> chex.Array:
-        """Returns forward action given the backward transition."""
-        batch_size = state.state.shape[0]
-        return backward_action + self.dim * state.state[jnp.arange(batch_size), backward_action]
+        """Returns forward action given the backward transition (single)."""
+        return backward_action + self.dim * state.state[backward_action].astype(jnp.int32)
 
     def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        """Get mask for a particular state to perform a forward action.
-
-        An action is invalid if there is already a spin (0 or 1) at the index
-        of the action.
-
-        Mask is a concatenation of two masks:
-        - mask for invalid forward actions for 0-spin
-        - mask for invalid forward actions for 1-spin (identical to 0-spin)
-        """
+        """Returns mask of invalid forward actions for a single state. [2*dim]"""
         mask = state.state != -1
         return jnp.concatenate([mask, mask], axis=-1)
 
     def get_invalid_backward_mask(self, state: EnvState, params: EnvParams) -> chex.Array:
-        """Get mask for a particular state to perform a backward action.
-
-        An action is invalid if there is no spin at the index of the action.
-        """
+        """Returns mask of invalid backward actions for a single state. [dim]"""
         return state.state == -1
 
     @property

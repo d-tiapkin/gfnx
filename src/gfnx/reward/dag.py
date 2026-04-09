@@ -16,11 +16,12 @@ class DAGRewardParams:
 
 @chex.dataclass
 class DAGRewardModule(BaseRewardModule[DAGEnvState, DAGEnvParams]):
-    '''
+    """
     Reward module for directed acyclic graph (DAG) structures.
     The reward is defined as the product of a prior over DAGs and a likelihood
     of data given the DAG.
-    '''
+    """
+
     prior: BaseDAGPrior
     likelihood: BaseDAGLikelihood
 
@@ -31,11 +32,13 @@ class DAGRewardModule(BaseRewardModule[DAGEnvState, DAGEnvParams]):
             likelihood_params=self.likelihood.init(likelihood_key, dummy_state),
         )
 
-    def reward(self, state: DAGEnvState, env_params: DAGEnvParams) -> TReward:
-        return jnp.exp(self.log_reward(state, env_params))
+    def reward(self, state: DAGEnvState, reward_params: DAGRewardParams) -> TReward:
+        return jnp.exp(self.log_reward(state, reward_params))
 
-    def log_reward(self, state: DAGEnvState, env_params: DAGEnvParams) -> TLogReward:
-        return self.likelihood.log_prob(state, env_params) + self.prior.log_prob(state, env_params)
+    def log_reward(self, state: DAGEnvState, reward_params: DAGRewardParams) -> TLogReward:
+        return self.likelihood.log_prob(
+            state, reward_params.likelihood_params
+        ) + self.prior.log_prob(state, reward_params.prior_params)
 
     def delta_score(
         self,
@@ -43,7 +46,10 @@ class DAGRewardModule(BaseRewardModule[DAGEnvState, DAGEnvParams]):
         action: TAction,
         next_state: DAGEnvState,
         env_params: DAGEnvParams,
+        reward_params: DAGRewardParams,
     ) -> TLogReward:
         return self.prior.delta_score(
-            state, action, next_state, env_params
-        ) + self.likelihood.delta_score(state, action, next_state, env_params)
+            state, action, next_state, env_params, reward_params.prior_params
+        ) + self.likelihood.delta_score(
+            state, action, next_state, env_params, reward_params.likelihood_params
+        )

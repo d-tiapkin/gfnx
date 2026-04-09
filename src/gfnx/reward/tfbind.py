@@ -1,5 +1,4 @@
-"""Reward functions used for TFBind-8 environment.
-"""
+"""Reward functions used for TFBind-8 environment."""
 
 import itertools
 import pickle
@@ -54,19 +53,12 @@ class TFBind8RewardModule(BaseRewardModule[TFBind8EnvState, TFBind8EnvParams]):
         values = jnp.clip(values, min=self.min_reward)
         return {"rewards": values}  # Dict with all possible values
 
-    def reward(self, state: TFBind8EnvState, env_params: TFBind8EnvParams) -> TReward:
-        tokens = state.tokens
+    def reward(self, state: TFBind8EnvState, reward_params) -> TReward:
         powers_array = jnp.array([
             self.nchar ** (self.max_length - i - 1) for i in range(self.max_length)
         ])
-        indices = jnp.sum(tokens * powers_array, axis=-1)
-        return jnp.take_along_axis(
-            env_params.reward_params["rewards"],
-            indices,
-            axis=0,
-            mode="fill",
-            fill_value=self.min_reward,
-        )
+        index = jnp.sum(state.tokens * powers_array)
+        return reward_params["rewards"][index]
 
-    def log_reward(self, state: TFBind8EnvState, env_params: TFBind8EnvParams) -> TLogReward:
-        return jnp.log(self.reward(state, env_params))
+    def log_reward(self, state: TFBind8EnvState, reward_params) -> TLogReward:
+        return jnp.log(self.reward(state, reward_params))

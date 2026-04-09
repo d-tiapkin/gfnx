@@ -1,0 +1,32 @@
+env_init_seed: 1
+num_seeds: 8
+num_train_steps: 62500
+num_evals: 25
+num_envs: 16
+
+agent:
+  learning_rate: 1e-3
+  logZ_learning_rate: 0.1
+  start_eps: 0.1
+  end_eps: 0.0
+  exploration_steps: 30000
+  train_backward: true
+
+network:
+  hidden_size: 256
+  depth: 2
+
+environment:
+  reward: "easy"
+  dim: 4
+  side: 20
+
+metrics:
+  batch_size: 256
+
+# Technical information for hydra
+hydra:
+  run:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ./tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}

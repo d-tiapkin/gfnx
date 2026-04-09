@@ -54,6 +54,7 @@ def uniform_backward_policy(rng_key, obs, policy_params):
     info = {"forward_logits": forward_logits, "backward_logits": backward_logits}
     return backward_logits, info
 
+
 metrics = gfnx.metrics.TestCorrelationMetricsModule(
     n_rounds=8,
     bwd_policy_fn=uniform_backward_policy,

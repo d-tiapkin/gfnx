@@ -38,9 +38,7 @@ class Visualizer:
         >>> visualizer.animate(trajectory, "animation.mp4")
     """
 
-    def __init__(
-        self, env: BaseVecEnvironment, env_params: BaseEnvParams, dpi: float = 200.0
-    ):
+    def __init__(self, env: BaseVecEnvironment, env_params: BaseEnvParams, dpi: float = 200.0):
         """Initialize the Visualizer with the given environment and parameters.
 
         Args:
