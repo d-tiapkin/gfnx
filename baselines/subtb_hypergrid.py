@@ -138,11 +138,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         env_obs: gfnx.TObs,
         current_policy_params,  # current_policy_params are network params
     ) -> tuple[chex.Array, dict]:
-        del fwd_rng_key
-        # Recombine the network parameters with the static parts of the model
         current_model = eqx.combine(current_policy_params, policy_static)
         policy_outputs = current_model(env_obs)
-        do_explore = jax.random.bernoulli(rng_key, cur_epsilon)
+        do_explore = jax.random.bernoulli(fwd_rng_key, cur_epsilon)
         forward_logits = jnp.where(do_explore, 0, policy_outputs["forward_logits"])
         return forward_logits, policy_outputs
 

@@ -39,7 +39,7 @@ class DummyPolicy:
 
     def __call__(self, rng_key, obs, policy_params):
         logits = jnp.ones((self.n_actions,))
-        return logits, {"fwd_logits": logits, "bwd_logits": logits}
+        return logits, {"forward_logits": logits, "backward_logits": logits}
 
 
 @pytest.mark.parametrize(
