@@ -293,7 +293,7 @@ class TrainState(NamedTuple):
     metrics_module: MultiMetricsModule
     metrics_state: MultiMetricsState
     reward_module: gfnx.DAGRewardModule
-    reward_params: chex.Array
+    reward_params: gfnx.DAGRewardParams
 
 
 @eqx.filter_jit
@@ -312,7 +312,10 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     # Define the policy function suitable for gfnx.utils.forward_rollout
     def fwd_policy_fn(rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params) -> chex.Array:
         policy = eqx.combine(policy_params, policy_static)
-        # GNNPolicy expects a batch dimension: unsqueeze, call, then squeeze
+        # GNNPolicy is internally batched: jraph's graph-packing pads edges to a
+        # fixed-size pool, which requires knowing the batch size up front. Unlike
+        # MLP/Transformer policies, a naive `jax.vmap` over graphs breaks dynamic
+        # edge shapes. We therefore add/squeeze a batch dim here.
         policy_outputs = jax.tree.map(lambda x: x.squeeze(0), policy(env_obs[None]))
         logits = policy_outputs["forward_logits"]
 
@@ -357,8 +360,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         # Compute the forward log-probs
         fwd_logits = policy_outputs["forward_logits"]
         invalid_mask = env.get_invalid_mask_batch(transitions.state, env_params)
-        masked_fwd_logits = gfnx.utils.mask_logits(fwd_logits, invalid_mask)
-        fwd_all_log_probs = jax.nn.log_softmax(masked_fwd_logits, axis=-1)
+        fwd_all_log_probs = jax.nn.log_softmax(
+            fwd_logits, where=jnp.logical_not(invalid_mask), axis=-1
+        )
         sink_logprobs = fwd_all_log_probs[:, -1]
         fwd_logprobs = jnp.take_along_axis(
             fwd_all_log_probs,
@@ -370,8 +374,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         next_policy_outputs = train_state.target_model(transitions.next_obs)
         next_fwd_logits = next_policy_outputs["forward_logits"]
         next_fwd_invalid_mask = env.get_invalid_mask_batch(transitions.next_state, env_params)
-        masked_next_fwd_logits = gfnx.utils.mask_logits(next_fwd_logits, next_fwd_invalid_mask)
-        next_fwd_all_log_probs = jax.nn.log_softmax(masked_next_fwd_logits, axis=-1)
+        next_fwd_all_log_probs = jax.nn.log_softmax(
+            next_fwd_logits, where=jnp.logical_not(next_fwd_invalid_mask), axis=-1
+        )
         next_sink_logprobs = next_fwd_all_log_probs[:, -1]
 
         bwd_logits = next_policy_outputs["backward_logits"]
@@ -556,7 +561,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         num_variables=cfg.environment.num_variables,
     )
     env_params = env.init(env_init_key)
-    reward_params = reward_module.init(env_init_key, env.get_init_state())
+    reward_params = reward_module.init(env_init_key, env.reset())
 
     rng_key, net_init_key = jax.random.split(rng_key)
     # Initialize the network

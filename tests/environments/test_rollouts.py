@@ -5,6 +5,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
+from gfnx.base import BaseEnvironment, BaseRewardModule
 from gfnx.environment.amp import AMPEnvironment
 from gfnx.environment.bitseq import BitseqEnvironment
 from gfnx.environment.dag import DAGEnvironment
@@ -126,14 +127,14 @@ class TestRollouts:
     @pytest.fixture
     def setup_forward_rollout(
         self, environment_class, reward_module_class, env_kwargs, reward_kwargs
-    ):
+    ) -> dict[str, Any]:
         """Setup environment and its components."""
-        reward_module = reward_module_class(**reward_kwargs)
-        env = environment_class(**env_kwargs)
+        reward_module : BaseRewardModule = reward_module_class(**reward_kwargs)
+        env : BaseEnvironment = environment_class(**env_kwargs)
         rng_key = jax.random.PRNGKey(0)
         num_envs = 1000
         env_params = env.init(rng_key)
-        reward_params = reward_module.init(rng_key, env.get_init_state())
+        reward_params = reward_module.init(rng_key, env.reset())
 
         fwd_policy = DummyPolicy(env.action_space.n)
         fwd_policy_params = None

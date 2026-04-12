@@ -5,14 +5,21 @@ import pickle
 import chex
 import jax.numpy as jnp
 
-from ..base import BaseRewardModule, TLogReward, TReward
+from ..base import BaseRewardModule, BaseRewardParams, TLogReward, TReward
 from ..environment import (
     QM9SmallEnvParams,
     QM9SmallEnvState,
 )
 
 
-class QM9SmallRewardModule(BaseRewardModule[QM9SmallEnvState, QM9SmallEnvParams]):
+@chex.dataclass(frozen=True)
+class QM9SmallRewardParams(BaseRewardParams):
+    rewards: chex.Array
+
+
+class QM9SmallRewardModule(
+    BaseRewardModule[QM9SmallEnvState, QM9SmallEnvParams, QM9SmallRewardParams]
+):
     def __init__(
         self,
         nchar: int = 11,
@@ -30,7 +37,9 @@ class QM9SmallRewardModule(BaseRewardModule[QM9SmallEnvState, QM9SmallEnvParams]
         self.reward_exponent = reward_exponent
         self.reward_scale = reward_scale
 
-    def init(self, rng_key: chex.PRNGKey, dummy_state: QM9SmallEnvState) -> None:
+    def init(
+        self, rng_key: chex.PRNGKey, dummy_state: QM9SmallEnvState
+    ) -> QM9SmallRewardParams:
         # Source: https://github.com/maxwshen/gflownet/blob/main/datasets/qm9str/block_qm9str_v1_s5.pkl
         with open("proxy/weights/qm9_small/block_qm9str_v1_s5.pkl", "rb") as f:
             oracle_d = pickle.load(f)
@@ -42,14 +51,18 @@ class QM9SmallRewardModule(BaseRewardModule[QM9SmallEnvState, QM9SmallEnvParams]
         values = jnp.clip(values_raw, min=self.min_reward)
         values = jnp.pow(values, self.reward_exponent)
         values = values * self.reward_scale / values.max()
-        return {"rewards": values}
+        return QM9SmallRewardParams(rewards=values)
 
-    def reward(self, state: QM9SmallEnvState, reward_params) -> TReward:
+    def reward(
+        self, state: QM9SmallEnvState, reward_params: QM9SmallRewardParams
+    ) -> TReward:
         powers_array = jnp.array([
             self.nchar ** (self.max_length - i - 1) for i in range(self.max_length)
         ])
         index = jnp.sum(state.tokens * powers_array)
-        return reward_params["rewards"][index]
+        return reward_params.rewards[index]
 
-    def log_reward(self, state: QM9SmallEnvState, reward_params) -> TLogReward:
+    def log_reward(
+        self, state: QM9SmallEnvState, reward_params: QM9SmallRewardParams
+    ) -> TLogReward:
         return jnp.log(self.reward(state, reward_params))

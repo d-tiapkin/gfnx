@@ -1,29 +1,39 @@
+from typing import Generic, TypeVar
+
 import chex
 import jax.numpy as jnp
 
-from ..base import TAction, TLogReward, TRewardParams
+from ..base import BaseRewardParams, TAction, TLogReward
 from ..environment import DAGEnvParams, DAGEnvState
 
 
-class BaseDAGPrior:
-    def init(self, rng_key: chex.PRNGKey, dummy_state: DAGEnvState) -> TRewardParams:
-        """Initialize the prior. Default implementation returns None.
+@chex.dataclass(frozen=True)
+class BaseDAGPriorParams(BaseRewardParams):
+    pass
+
+
+TDAGPriorParams = TypeVar("TDAGPriorParams", bound=BaseDAGPriorParams)
+
+
+class BaseDAGPrior(Generic[TDAGPriorParams]):
+    def init(self, rng_key: chex.PRNGKey, dummy_state: DAGEnvState) -> TDAGPriorParams:
+        """Initialize the prior.
 
         Args:
         - rng_key: chex.PRNGKey, random key
-        - dummy_state: DAGEnvState, shape [1, ...], a dummy state
+        - dummy_state: DAGEnvState, single dummy state (no batch dim)
         """
-        return None
+        raise NotImplementedError
 
-    def log_prob(self, state: DAGEnvState, prior_params: TRewardParams) -> TLogReward:
+    def log_prob(self, state: DAGEnvState, prior_params: TDAGPriorParams) -> TLogReward:
         """Computes log P(G).
 
         Args:
-        - state: DAGEnvState, shape [...], single state (no batch dim)
-        - prior_params: TRewardParams, params of prior
+        - state: DAGEnvState, single state (no batch dim)
+        - prior_params: prior-specific parameters produced by ``init``
 
         Returns:
-        - TLogReward, scalar log P(G)
+        - scalar log P(G)
         """
         raise NotImplementedError
 
@@ -33,20 +43,20 @@ class BaseDAGPrior:
         action: TAction,
         next_state: DAGEnvState,
         env_params: DAGEnvParams,
-        prior_params: TRewardParams,
+        prior_params: TDAGPriorParams,
     ) -> TLogReward:
         """Computes log P(G') - log P(G), where G' is the result of adding
         the edge X_i -> X_j to G.
 
         Args:
-        - state: DAGEnvState, shape [B, ...], batch of states
-        - action: DAGEnvAction, shape [B], batch of actions
-        - next_state: DAGEnvState, shape [B, ...], batch of next states
+        - state: DAGEnvState, single state (no batch dim)
+        - action: DAGEnvAction, scalar action
+        - next_state: DAGEnvState, single next state (no batch dim)
         - env_params: DAGEnvParams, params of environment
-        - prior_params: TRewardParams, params of prior
+        - prior_params: prior-specific parameters produced by ``init``
 
         Returns:
-        - TLogReward, shape [B], batch of log P(G') - log P(G)
+        - scalar log P(G') - log P(G)
         """
         return self.log_prob(next_state, prior_params) - self.log_prob(state, prior_params)
 
@@ -55,13 +65,16 @@ class BaseDAGPrior:
         return jnp.count_nonzero(state.adjacency_matrix, axis=1)
 
 
-class UniformDAGPrior(BaseDAGPrior):
+class UniformDAGPrior(BaseDAGPrior[BaseDAGPriorParams]):
     def __init__(self, num_variables: int) -> None:
         # We can assign an arbitrary constant here,
         # since we only need an unnormalized score in GFlowNets
         self._log_prior = jnp.zeros(num_variables)
 
-    def log_prob(self, state: DAGEnvState, prior_params: TRewardParams) -> TLogReward:
+    def init(self, rng_key: chex.PRNGKey, dummy_state: DAGEnvState) -> BaseDAGPriorParams:
+        return BaseDAGPriorParams()
+
+    def log_prob(self, state: DAGEnvState, prior_params: BaseDAGPriorParams) -> TLogReward:
         num_parents = self.num_parents(state)
         return jnp.sum(self._log_prior[num_parents])  # scalar
 
@@ -71,6 +84,6 @@ class UniformDAGPrior(BaseDAGPrior):
         action: TAction,
         next_state: DAGEnvState,
         env_params: DAGEnvParams,
-        prior_params: TRewardParams,
+        prior_params: BaseDAGPriorParams,
     ) -> TLogReward:
-        return jnp.zeros(state.is_pad.shape[0])  # [B]
+        return jnp.zeros(())  # scalar

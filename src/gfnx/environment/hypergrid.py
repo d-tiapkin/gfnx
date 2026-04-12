@@ -44,7 +44,7 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
 
         self.stop_action = self.dim  # Stop action id
 
-    def get_init_state(self) -> EnvState:
+    def reset(self) -> EnvState:
         return EnvState(
             state=jnp.zeros((self.dim,), dtype=jnp.int32),
             is_terminal=jnp.bool_(False),
@@ -87,12 +87,12 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
             mode="clip",
         )
 
-    def _transition(
+    def step(
         self,
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
-    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
         # Compute the "active" next state (always, regardless of is_terminal)
         done = jnp.logical_or(
             action == self.stop_action,
@@ -110,14 +110,19 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
         next_state = jax.tree.map(
             lambda p, a: jnp.where(state.is_terminal, p, a), next_pad, next_active
         )
-        return next_state, next_state.is_terminal, {}
+        return (
+            self.get_obs(next_state, env_params),
+            next_state,
+            jnp.astype(next_state.is_terminal, jnp.bool),
+            {},
+        )
 
-    def _backward_transition(
+    def backward_step(
         self,
         state: EnvState,
         backward_action: chex.Array,
         env_params: EnvParams,
-    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
         # Undo stop: just un-set terminal flag
         undo_stop = EnvState(
             state=state.state,
@@ -142,7 +147,12 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
         prev_state = jax.tree.map(
             lambda p, n: jnp.where(state.is_initial, p, n), init_pad, non_initial
         )
-        return prev_state, prev_state.is_initial, {}
+        return (
+            self.get_obs(prev_state, env_params),
+            prev_state,
+            jnp.astype(prev_state.is_initial, jnp.bool),
+            {},
+        )
 
     def get_obs(self, state: EnvState, env_params: EnvParams) -> chex.Array:
         """Returns one-hot observation for a single state."""
@@ -257,10 +267,10 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
         return empirical_dist
 
     @property
-    def is_mean_reward_tractable(self) -> bool:
+    def is_expected_reward_tractable(self) -> bool:
         return True
 
-    def get_mean_reward(
+    def get_expected_reward(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> float:
         rewards = self._get_states_rewards(env_params, reward_module, reward_params)

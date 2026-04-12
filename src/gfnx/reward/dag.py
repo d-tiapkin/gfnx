@@ -2,20 +2,20 @@ import chex
 import jax
 import jax.numpy as jnp
 
-from ..base import BaseRewardModule, TAction, TLogReward, TReward, TRewardParams
+from ..base import BaseRewardModule, BaseRewardParams, TAction, TLogReward, TReward
 from ..environment import DAGEnvParams, DAGEnvState
-from .dag_likelihood import BaseDAGLikelihood
-from .dag_prior import BaseDAGPrior
+from .dag_likelihood import BaseDAGLikelihood, BaseDAGLikelihoodParams
+from .dag_prior import BaseDAGPrior, BaseDAGPriorParams
 
 
 @chex.dataclass(frozen=True)
-class DAGRewardParams:
-    prior_params: TRewardParams
-    likelihood_params: TRewardParams
+class DAGRewardParams(BaseRewardParams):
+    prior_params: BaseDAGPriorParams
+    likelihood_params: BaseDAGLikelihoodParams
 
 
 @chex.dataclass
-class DAGRewardModule(BaseRewardModule[DAGEnvState, DAGEnvParams]):
+class DAGRewardModule(BaseRewardModule[DAGEnvState, DAGEnvParams, DAGRewardParams]):
     """
     Reward module for directed acyclic graph (DAG) structures.
     The reward is defined as the product of a prior over DAGs and a likelihood

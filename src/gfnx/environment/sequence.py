@@ -69,7 +69,7 @@ class SequenceEnvironment(BaseEnvironment[EnvState, EnvParams]):
         self.eos_token = eos_token
         self.pad_token = pad_token
 
-    def get_init_state(self) -> EnvState:
+    def reset(self) -> EnvState:
         tokens = jnp.full(
             shape=(self.max_length,),
             fill_value=self.pad_token,
@@ -90,22 +90,6 @@ class SequenceEnvironment(BaseEnvironment[EnvState, EnvParams]):
     @property
     def max_steps_in_episode(self) -> int:
         return self.max_length
-
-    def _transition(
-        self,
-        state: EnvState,
-        action: TAction,
-        env_params: EnvParams,
-    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
-        raise NotImplementedError
-
-    def _backward_transition(
-        self,
-        state: EnvState,
-        backward_action: TBackwardAction,
-        env_params: EnvParams,
-    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
-        raise NotImplementedError
 
     def get_obs(self, state: EnvState, env_params: EnvParams) -> chex.Array:
         """Returns observation: BOS token prepended to tokens (single state)."""
@@ -178,17 +162,17 @@ class SequenceEnvironment(BaseEnvironment[EnvState, EnvParams]):
 class FixedAutoregressiveSequenceEnvironment(SequenceEnvironment):
     """Sequence environment with fixed length and autoregressive generation."""
 
-    def _transition(
+    def step(
         self,
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
-    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
         num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
         pos_to_update = self.max_length - num_pad
         next_tokens = state.tokens.at[pos_to_update].set(action)
         is_done = jnp.all(next_tokens != self.pad_token)
-        next_active = EnvState(
+        next_active = state.replace(
             tokens=next_tokens,
             is_terminal=is_done,
             is_initial=False,
@@ -198,11 +182,16 @@ class FixedAutoregressiveSequenceEnvironment(SequenceEnvironment):
         next_state = jax.tree.map(
             lambda p, a: jnp.where(state.is_terminal, p, a), next_pad, next_active
         )
-        return next_state, next_state.is_terminal, {}
+        return (
+            self.get_obs(next_state, env_params),
+            next_state,
+            jnp.astype(next_state.is_terminal, jnp.bool),
+            {},
+        )
 
-    def _backward_transition(
+    def backward_step(
         self, state: EnvState, backward_action: TBackwardAction, env_params: EnvParams
-    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
         num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
         last_position = self.max_length - num_pad
         prev_tokens = state.tokens.at[last_position - 1].set(self.pad_token)
@@ -216,7 +205,12 @@ class FixedAutoregressiveSequenceEnvironment(SequenceEnvironment):
         prev_state = jax.tree.map(
             lambda p, n: jnp.where(state.is_initial, p, n), init_pad, non_initial
         )
-        return prev_state, prev_state.is_initial, {}
+        return (
+            self.get_obs(prev_state, env_params),
+            prev_state,
+            jnp.astype(prev_state.is_initial, jnp.bool),
+            {},
+        )
 
     def get_backward_action(
         self,
@@ -257,12 +251,12 @@ class FixedAutoregressiveSequenceEnvironment(SequenceEnvironment):
 class FixedPrependAppendSequenceEnvironment(SequenceEnvironment):
     """Sequence environment with fixed length and prepend-append generation."""
 
-    def _transition(
+    def step(
         self,
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
-    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
         def get_next_tokens_prepend(state: EnvState, action: TAction) -> chex.Array:
             next_tokens = jax.lax.dynamic_update_slice(state.tokens, state.tokens[:-1], (1,))
             return next_tokens.at[0].set(action)
@@ -280,7 +274,7 @@ class FixedPrependAppendSequenceEnvironment(SequenceEnvironment):
             action,
         )
         is_done = jnp.all(next_tokens != self.pad_token)
-        next_active = EnvState(
+        next_active = state.replace(
             tokens=next_tokens,
             is_terminal=is_done,
             is_initial=False,
@@ -290,14 +284,19 @@ class FixedPrependAppendSequenceEnvironment(SequenceEnvironment):
         next_state = jax.tree.map(
             lambda p, a: jnp.where(state.is_terminal, p, a), next_pad, next_active
         )
-        return next_state, next_state.is_terminal, {}
+        return (
+            self.get_obs(next_state, env_params),
+            next_state,
+            jnp.astype(next_state.is_terminal, jnp.bool),
+            {},
+        )
 
-    def _backward_transition(
+    def backward_step(
         self,
         state: EnvState,
         backward_action: TBackwardAction,
         env_params: EnvParams,
-    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
         num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
         last_position = self.max_length - num_pad
 
@@ -324,7 +323,12 @@ class FixedPrependAppendSequenceEnvironment(SequenceEnvironment):
         prev_state = jax.tree.map(
             lambda p, n: jnp.where(state.is_initial, p, n), init_pad, non_initial
         )
-        return prev_state, prev_state.is_initial, {}
+        return (
+            self.get_obs(prev_state, env_params),
+            prev_state,
+            jnp.astype(prev_state.is_initial, jnp.bool),
+            {},
+        )
 
     def get_backward_action(
         self,
@@ -386,21 +390,21 @@ class AutoregressiveSequenceEnvironment(SequenceEnvironment):
         )
         self.stop_action = nchar
 
-    def _transition(
+    def step(
         self,
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
-    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
         num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
         pos_to_update = self.max_length - num_pad
         action_to_token = jnp.where(action != self.stop_action, action, self.eos_token)
         next_tokens = state.tokens.at[pos_to_update].set(action_to_token)
         is_done = jnp.logical_or(
-            jnp.all(next_tokens != self.pad_token),
-            action == self.stop_action,
+            jnp.all(next_tokens != self.pad_token),  # all pad tokens are replaced by characters
+            action == self.stop_action,  # EOS token is generated
         )
-        next_active = EnvState(
+        next_active = state.replace(
             tokens=next_tokens,
             is_terminal=is_done,
             is_initial=False,
@@ -410,11 +414,16 @@ class AutoregressiveSequenceEnvironment(SequenceEnvironment):
         next_state = jax.tree.map(
             lambda p, a: jnp.where(state.is_terminal, p, a), next_pad, next_active
         )
-        return next_state, next_state.is_terminal, {}
+        return (
+            self.get_obs(next_state, env_params),
+            next_state,
+            jnp.astype(next_state.is_terminal, jnp.bool),
+            {},
+        )
 
-    def _backward_transition(
+    def backward_step(
         self, state: EnvState, backward_action: TBackwardAction, env_params: EnvParams
-    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
         num_pad = jnp.sum(state.tokens == self.pad_token, axis=-1)
         last_pos = self.max_length - num_pad
         prev_tokens = state.tokens.at[last_pos - 1].set(self.pad_token)
@@ -428,7 +437,12 @@ class AutoregressiveSequenceEnvironment(SequenceEnvironment):
         prev_state = jax.tree.map(
             lambda p, n: jnp.where(state.is_initial, p, n), init_pad, non_initial
         )
-        return prev_state, prev_state.is_initial, {}
+        return (
+            self.get_obs(prev_state, env_params),
+            prev_state,
+            jnp.astype(prev_state.is_initial, jnp.bool),
+            {},
+        )
 
     def get_backward_action(
         self,
@@ -470,16 +484,16 @@ class AutoregressiveSequenceEnvironment(SequenceEnvironment):
 class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
     """Sequence environment with fixed length and non-autoregressive generation."""
 
-    def _transition(
+    def step(
         self,
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
-    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
         pos, word = jnp.unravel_index(action, (self.max_length, self.nchar))
         next_tokens = state.tokens.at[pos].set(word)
         is_done = jnp.all(next_tokens != self.pad_token)
-        next_active = EnvState(
+        next_active = state.replace(
             tokens=next_tokens,
             is_terminal=is_done,
             is_initial=False,
@@ -489,14 +503,19 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
         next_state = jax.tree.map(
             lambda p, a: jnp.where(state.is_terminal, p, a), next_pad, next_active
         )
-        return next_state, next_state.is_terminal, {}
+        return (
+            self.get_obs(next_state, env_params),
+            next_state,
+            jnp.astype(next_state.is_terminal, jnp.bool),
+            {},
+        )
 
-    def _backward_transition(
+    def backward_step(
         self,
         state: EnvState,
         backward_action: TBackwardAction,
         env_params: EnvParams,
-    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
         prev_tokens = state.tokens.at[backward_action].set(self.pad_token)
         is_initial = jnp.all(prev_tokens == self.pad_token)
         non_initial = state.replace(
@@ -508,7 +527,12 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
         prev_state = jax.tree.map(
             lambda p, n: jnp.where(state.is_initial, p, n), init_pad, non_initial
         )
-        return prev_state, prev_state.is_initial, {}
+        return (
+            self.get_obs(prev_state, env_params),
+            prev_state,
+            jnp.astype(prev_state.is_initial, jnp.bool),
+            {},
+        )
 
     def get_backward_action(
         self,
@@ -533,9 +557,13 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
         )
 
     def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        """Return mask of invalid actions (single state). [max_length * nchar]"""
         pos_mask = state.tokens != self.pad_token  # [max_length]
+        chex.assert_shape(pos_mask, (self.max_length,))
         invalid_mask_2d = jnp.repeat(jnp.expand_dims(pos_mask, axis=1), repeats=self.nchar, axis=1)
+        chex.assert_shape(invalid_mask_2d, (self.max_length, self.nchar))
         invalid_mask_flat = invalid_mask_2d.reshape(-1)
+        # If all positions are already filled (all True), return all-zeros mask
         all_filled = jnp.all(pos_mask)
         return jnp.where(all_filled, jnp.zeros_like(invalid_mask_flat), invalid_mask_flat)
 

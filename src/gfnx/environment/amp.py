@@ -35,4 +35,4 @@ class AMPEnvironment(AutoregressiveSequenceEnvironment):
             self.pad_token,
             self.eos_token,
         )
-        return jnp.concat([state.tokens, jnp.expand_dims(to_append, 0)], axis=-1)
+        return jnp.concat([state.tokens, to_append[None]], axis=-1)

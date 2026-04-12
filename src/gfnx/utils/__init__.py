@@ -9,7 +9,7 @@ from .exploration import (
 from .ising import get_true_ising_J
 from .ising_hbpt_sample import pt_sampler
 from .ising_wolf_sample import wolff_sampler
-from .masking import compute_action_log_probs, mask_logits
+from .masking import compute_action_log_probs, masked_mean, masked_sum
 from .molecules import (
     QM9_SMALL_BLOCKS,
     QM9_SMALL_FULL_ALPHABET,
@@ -63,7 +63,8 @@ __all__ = [
     "jensen_shannon_divergence",
     "kl_divergence",
     "make_replay_buffer",
-    "mask_logits",
+    "masked_mean",
+    "masked_sum",
     "pt_sampler",
     "run_training_loop",
     "split_traj_to_transitions",

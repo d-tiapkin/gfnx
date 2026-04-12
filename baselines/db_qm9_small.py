@@ -114,7 +114,7 @@ class TrainState(NamedTuple):
     env: gfnx.QM9SmallEnvironment
     env_params: chex.Array
     reward_module: gfnx.QM9SmallRewardModule
-    reward_params: chex.Array
+    reward_params: gfnx.QM9SmallRewardParams
     model: MLPPolicy
     optimizer: optax.GradientTransformation
     opt_state: optax.OptState
@@ -313,7 +313,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     # Initialize the environment and its inner parameters
     env = gfnx.QM9SmallEnvironment()
     env_params = env.init(env_init_key)
-    reward_params = reward_module.init(env_init_key, env.get_init_state())
+    reward_params = reward_module.init(env_init_key, env.reset())
 
     rng_key, net_init_key = jax.random.split(rng_key)
     # Initialize the network

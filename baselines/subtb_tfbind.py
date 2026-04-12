@@ -119,7 +119,7 @@ class TrainState(NamedTuple):
     exploration_schedule: optax.Schedule
     eval_info: dict
     reward_module: gfnx.TFBind8RewardModule
-    reward_params: chex.Array
+    reward_params: gfnx.TFBind8RewardParams
 
 
 @eqx.filter_jit
@@ -354,7 +354,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     # Initialize the environment and its inner parameters
     env = gfnx.TFBind8Environment()
     env_params = env.init(env_init_key)
-    reward_params = reward_module.init(env_init_key, env.get_init_state())
+    reward_params = reward_module.init(env_init_key, env.reset())
 
     rng_key, net_init_key = jax.random.split(rng_key)
     # Initialize the network

@@ -223,7 +223,7 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
         num_states = transition.shape[0] // 2
 
         initial_vector = jnp.zeros((2 * num_states,))
-        initial_state = self.env.get_init_state()
+        initial_state = self.env.reset()
         initial_idx = self.env.state_to_index(initial_state, args.env_params)
         initial_vector = initial_vector.at[initial_idx].set(1.0)
 
@@ -307,9 +307,13 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
         )  # [num_states]
         actions = jnp.arange(self.env.action_space.n)  # [num_actions]
 
-        next_state, is_terminal, _ = jax.vmap(
-            jax.vmap(self.env._transition, in_axes=(None, 0, None)), in_axes=(0, None, None)
-        )(all_states, actions, env_params)
+        next_state, is_terminal = jax.vmap(
+            jax.vmap(
+                lambda s, a: self.env.step(s, a, env_params)[1:3],
+                in_axes=(None, 0),
+            ),
+            in_axes=(0, None),
+        )(all_states, actions)
         next_state_idx = jax.vmap(
             jax.vmap(self.env.state_to_index, in_axes=(0, None)), in_axes=(0, None)
         )(next_state, env_params)

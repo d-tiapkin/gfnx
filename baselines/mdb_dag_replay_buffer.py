@@ -289,7 +289,7 @@ class TrainState(NamedTuple):
     env: gfnx.DAGEnvironment
     env_params: chex.Array
     reward_module: gfnx.DAGRewardModule
-    reward_params: chex.Array
+    reward_params: gfnx.DAGRewardParams
     replay_buffer: ReplayBuffer[TransitionData]
     replay_buffer_state: ReplayBufferState[TransitionData]
     exploration_schedule: optax.Schedule
@@ -383,8 +383,9 @@ def update_step(
         invalid_mask = train_state.env.get_invalid_mask_batch(
             transitions.state, train_state.env_params
         )
-        masked_fwd_logits = gfnx.utils.mask_logits(fwd_logits, invalid_mask)
-        fwd_all_log_probs = jax.nn.log_softmax(masked_fwd_logits, axis=-1)
+        fwd_all_log_probs = jax.nn.log_softmax(
+            fwd_logits, where=jnp.logical_not(invalid_mask), axis=-1
+        )
         sink_logprobs = fwd_all_log_probs[:, -1]
         fwd_logprobs = jnp.take_along_axis(
             fwd_all_log_probs,
@@ -398,19 +399,18 @@ def update_step(
         next_fwd_invalid_mask = train_state.env.get_invalid_mask_batch(
             transitions.next_state, train_state.env_params,
         )
-        masked_next_fwd_logits = gfnx.utils.mask_logits(next_fwd_logits, next_fwd_invalid_mask)
-        next_fwd_all_log_probs = jax.nn.log_softmax(masked_next_fwd_logits, axis=-1)
+        next_fwd_all_log_probs = jax.nn.log_softmax(
+            next_fwd_logits, where=jnp.logical_not(next_fwd_invalid_mask), axis=-1
+        )
         next_sink_logprobs = next_fwd_all_log_probs[:, -1]
 
         bwd_logits = next_policy_outputs["backward_logits"]
         next_bwd_invalid_mask = train_state.env.get_invalid_backward_mask_batch(
             transitions.next_state, train_state.env_params,
         )
-        masked_bwd_logits = gfnx.utils.mask_logits(bwd_logits, next_bwd_invalid_mask)
-        bwd_all_log_probs = jax.nn.log_softmax(masked_bwd_logits, axis=-1)
-        bwd_logprobs = jnp.take_along_axis(
-            bwd_all_log_probs, jnp.expand_dims(bwd_actions, axis=-1), axis=-1
-        ).squeeze(-1)
+        bwd_logprobs = gfnx.utils.compute_action_log_probs(
+            bwd_logits, bwd_actions, next_bwd_invalid_mask
+        )
         delta_score = train_state.reward_module.delta_score(
             transitions.state,
             transitions.action,
@@ -588,14 +588,14 @@ def run_experiment(cfg: OmegaConf) -> None:
         )
     else:
         raise ValueError(f"Unknown likelihood type: {cfg.environment.likelihood.type}")
-    reward_module = gfnx.DAGRewardModule(prior=prior, likelihood=likelihood)
 
     # Initialize the environment and its inner parameters
     env = gfnx.environment.DAGEnvironment(
         num_variables=cfg.environment.num_variables,
     )
+    reward_module = gfnx.DAGRewardModule(prior=prior, likelihood=likelihood)
     env_params = env.init(env_init_key)
-    reward_params = reward_module.init(env_init_key, env.get_init_state())
+    reward_params = reward_module.init(env_init_key, env.reset())
 
     # Initialize the replay buffer
     replay_buffer = make_replay_buffer(
@@ -603,9 +603,9 @@ def run_experiment(cfg: OmegaConf) -> None:
         min_length=cfg.replay_buffer.min_length,
         sample_batch_size=cfg.replay_buffer.sample_batch_size,
     )
-    dummy_state = env.get_init_state()
+    dummy_state = env.reset()
     dummy_obs = env.get_obs(dummy_state, env_params)
-    dummy_action = env.sample_action(rng_key, jnp.zeros(env.action_space.n))
+    dummy_action = jnp.array(0, dtype=jnp.int32)
     dummy_transition = TransitionData(
         obs=dummy_obs,
         state=dummy_state,

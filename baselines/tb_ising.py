@@ -121,7 +121,7 @@ class TrainState(NamedTuple):
     env: gfnx.IsingEnvironment
     env_params: gfnx.IsingEnvParams
     reward_module: gfnx.IsingRewardModule
-    reward_params: chex.Array
+    reward_params: IsingRewardParams
     model: MLPPolicy
     logZ: chex.Array
     ebm: EBM
@@ -363,7 +363,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     new_logZ = eqx.apply_updates(train_state.logZ, updates["logZ"])
     new_ebm = eqx.apply_updates(train_state.ebm, updates["ebm_params"])
 
-    new_reward_params = IsingRewardParams(J=new_ebm.J)
+    new_reward_params = train_state.reward_params.replace(J=new_ebm.J)
 
     def logging_callback(idx: int, train_info: dict, eval_info: dict):
         if (
@@ -422,7 +422,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     # Lattice with a side N has N^2 spins
     env = gfnx.environment.IsingEnvironment(dim=cfg.environment.N**2)
     env_params = env.init(env_init_key)
-    reward_params = reward_module.init(env_init_key, env.get_init_state())
+    reward_params = reward_module.init(env_init_key, env.reset())
 
     # Collect true samples from the true distribution and initialize the sample buffer
     if cfg.data.sampler == "pt":

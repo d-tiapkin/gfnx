@@ -45,7 +45,7 @@ class IsingEnvironment(BaseEnvironment[EnvState, EnvParams]):
     def __init__(self, dim: int = 10) -> None:
         self.dim = dim
 
-    def get_init_state(self) -> EnvState:
+    def reset(self) -> EnvState:
         return EnvState(
             state=jnp.full((self.dim,), -1, dtype=jnp.int8),
             time=jnp.int32(0),
@@ -61,12 +61,12 @@ class IsingEnvironment(BaseEnvironment[EnvState, EnvParams]):
     def max_steps_in_episode(self) -> int:
         return self.dim
 
-    def _transition(
+    def step(
         self,
         state: EnvState,
         action: TAction,
         env_params: EnvParams,
-    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
         spin_index = jnp.mod(action, self.dim)
         spin_value = jnp.asarray(action // self.dim, dtype=jnp.int8)
         new_state_arr = state.state.at[spin_index].set(spin_value)
@@ -81,14 +81,19 @@ class IsingEnvironment(BaseEnvironment[EnvState, EnvParams]):
         next_state = jax.tree.map(
             lambda p, a: jnp.where(state.is_terminal, p, a), next_pad, next_active
         )
-        return next_state, next_state.is_terminal, {}
+        return (
+            self.get_obs(next_state, env_params),
+            next_state,
+            jnp.astype(next_state.is_terminal, jnp.bool),
+            {},
+        )
 
-    def _backward_transition(
+    def backward_step(
         self,
         state: EnvState,
         backward_action: chex.Array,
         env_params: EnvParams,
-    ) -> tuple[EnvState, TDone, dict[Any, Any]]:
+    ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
         prev_state_arr = state.state.at[backward_action].set(-1)
         non_initial = EnvState(
             state=prev_state_arr,
@@ -101,7 +106,12 @@ class IsingEnvironment(BaseEnvironment[EnvState, EnvParams]):
         prev_state = jax.tree.map(
             lambda p, n: jnp.where(state.is_initial, p, n), init_pad, non_initial
         )
-        return prev_state, prev_state.is_initial, {}
+        return (
+            self.get_obs(prev_state, env_params),
+            prev_state,
+            jnp.astype(prev_state.is_initial, jnp.bool),
+            {},
+        )
 
     def get_obs(self, state: EnvState, env_params: EnvParams) -> chex.Array:
         """Returns the lattice partial assignment of spins (single state)."""
@@ -128,12 +138,21 @@ class IsingEnvironment(BaseEnvironment[EnvState, EnvParams]):
         return backward_action + self.dim * state.state[backward_action].astype(jnp.int32)
 
     def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        """Returns mask of invalid forward actions for a single state. [2*dim]"""
+        """Returns mask of invalid forward actions for a single state. [2*dim].
+
+        An action is invalid if there is already a spin (0 or 1) at the index
+        of the action. The mask is a concatenation of two masks:
+        - mask for invalid forward actions for 0-spin
+        - mask for invalid forward actions for 1-spin (identical to 0-spin)
+        """
         mask = state.state != -1
         return jnp.concatenate([mask, mask], axis=-1)
 
     def get_invalid_backward_mask(self, state: EnvState, params: EnvParams) -> chex.Array:
-        """Returns mask of invalid backward actions for a single state. [dim]"""
+        """Returns mask of invalid backward actions for a single state. [dim].
+
+        An action is invalid if there is no spin at the index of the action.
+        """
         return state.state == -1
 
     @property

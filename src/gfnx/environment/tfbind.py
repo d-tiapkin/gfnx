@@ -82,16 +82,14 @@ class TFBind8Environment(FixedAutoregressiveSequenceEnvironment):
         return empirical_dist
 
     @property
-    def is_mean_reward_tractable(self) -> bool:
-        """Whether this environment supports mean reward tractability."""
+    def is_expected_reward_tractable(self) -> bool:
+        """Whether this environment supports tractable expected reward."""
         return True
 
-    def get_mean_reward(
+    def get_expected_reward(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> float:
-        """
-        Returns the mean reward.
-        """
+        """Returns the expected reward under the reward-proportional distribution."""
         rewards = self._get_states_rewards(env_params, reward_module, reward_params)
         return jnp.pow(rewards, 2).sum() / rewards.sum()
 

@@ -369,7 +369,7 @@ class OnPolicyCorrelationMetricsModule(BaseCorrelationMetricsModule):
                 and zero-initialized arrays for rewards and log-ratios with shape
                 (domain_size,) representing the transformed probability space
         """
-        dummy_state = self.env.get_init_state()
+        dummy_state = self.env.reset()
         dummy_terminal_states = jax.tree.map(
             lambda x: jnp.broadcast_to(x[None], (self.n_terminal_states,) + x.shape),
             dummy_state,

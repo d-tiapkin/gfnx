@@ -3,10 +3,20 @@ import jax
 import jax.numpy as jnp
 
 
-def mask_logits(logits: chex.Array, invalid_actions_mask: chex.Array) -> chex.Array:
-    chex.assert_equal_shape([logits, invalid_actions_mask])
-    min_logit = jnp.finfo(logits.dtype).min
-    return jnp.where(invalid_actions_mask, min_logit, logits)
+def masked_sum(
+    x: chex.Array, mask: chex.Array, axis: int | tuple[int, ...] | None = None
+) -> chex.Array:
+    """Sum of `x` over `axis`, counting only entries where `mask` is True."""
+    return jnp.sum(jnp.where(mask, x, jnp.zeros_like(x)), axis=axis)
+
+
+def masked_mean(
+    x: chex.Array, mask: chex.Array, axis: int | tuple[int, ...] | None = None
+) -> chex.Array:
+    """Mean of `x` over `axis`, counting only entries where `mask` is True."""
+    total = masked_sum(x, mask, axis=axis)
+    count = jnp.sum(mask.astype(x.dtype), axis=axis)
+    return total / jnp.maximum(count, 1)
 
 
 def compute_action_log_probs(
@@ -26,7 +36,7 @@ def compute_action_log_probs(
     Returns:
         Log-probabilities of selected actions, shape [...]. Padding steps are 0.0.
     """
-    log_probs = jax.nn.log_softmax(mask_logits(logits, invalid_mask), axis=-1)
+    log_probs = jax.nn.log_softmax(logits, where=jnp.logical_not(invalid_mask), axis=-1)
     selected = jnp.take_along_axis(log_probs, jnp.expand_dims(actions, -1), axis=-1).squeeze(-1)
     if pad_mask is not None:
         selected = jnp.where(pad_mask, 0.0, selected)

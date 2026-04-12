@@ -41,7 +41,7 @@ class MeanRewardMetricsModule(BaseMetricsModule):
 
     Attributes:
         env: Environment instance that must support tractable mean reward computation
-        gt_mean_reward: Ground truth mean reward from the environment
+        gt_expected_reward: Ground truth mean reward from the environment
     """
 
     def __init__(self, env: TEnvironment, env_params: TEnvParams):
@@ -49,15 +49,15 @@ class MeanRewardMetricsModule(BaseMetricsModule):
 
         Args:
             env: Environment instance that must have tractable mean reward computation
-                (env.is_mean_reward_tractable must be True)
+                (env.is_expected_reward_tractable must be True)
             env_params: Environment parameters needed to compute the ground truth mean reward
 
         Raises:
             ValueError: If the environment does not support tractable mean reward computation
         """
         self.env = env
-        if self.env.is_mean_reward_tractable:
-            self.gt_mean_reward = self.env.get_mean_reward(env_params)
+        if self.env.is_expected_reward_tractable:
+            self.gt_expected_reward = self.env.get_expected_reward(env_params)
         else:
             raise ValueError("Ground truth mean reward is not tractable for this environment.")
 
@@ -153,8 +153,8 @@ class MeanRewardMetricsModule(BaseMetricsModule):
                 - 'rel_reward_delta': Relative difference (normalized by ground truth mean)
         """
         mean_reward = metrics_state.sum_reward / jnp.maximum(metrics_state.num, 1)
-        reward_delta = abs(mean_reward - self.gt_mean_reward)
-        rel_reward_delta = reward_delta / self.gt_mean_reward
+        reward_delta = abs(mean_reward - self.gt_expected_reward)
+        rel_reward_delta = reward_delta / self.gt_expected_reward
         return {
             "mean_reward": mean_reward,
             "reward_delta": reward_delta,
@@ -186,7 +186,7 @@ class SWMeanRewardSWMetricsModule(BaseMetricsModule):
 
     Attributes:
         env: Environment instance that must support tractable mean reward computation
-        gt_mean_reward: Ground truth mean reward from the environment
+        gt_expected_reward: Ground truth mean reward from the environment
         buffer_size: Maximum number of rewards to keep in the sliding window
         buffer_module: Flashbax buffer module for managing the sliding window
     """
@@ -196,7 +196,7 @@ class SWMeanRewardSWMetricsModule(BaseMetricsModule):
 
         Args:
             env: Environment instance that must have tractable mean reward computation
-                (env.is_mean_reward_tractable must be True)
+                (env.is_expected_reward_tractable must be True)
             env_params: Environment parameters needed to compute the ground truth mean reward
             buffer_size: Maximum number of reward samples to keep in the sliding window.
                 Must be a positive integer.
@@ -205,8 +205,8 @@ class SWMeanRewardSWMetricsModule(BaseMetricsModule):
             ValueError: If the environment does not support tractable mean reward computation
         """
         self.env = env
-        if self.env.is_mean_reward_tractable:
-            self.gt_mean_reward = self.env.get_mean_reward(env_params)
+        if self.env.is_expected_reward_tractable:
+            self.gt_expected_reward = self.env.get_expected_reward(env_params)
         else:
             raise ValueError("Ground truth mean reward is not tractable for this environment.")
 
@@ -319,8 +319,8 @@ class SWMeanRewardSWMetricsModule(BaseMetricsModule):
         )
         num_valid = jnp.sum(valid_mask)
         mean_reward = jnp.sum(buffer_state.experience * valid_mask) / jnp.maximum(num_valid, 1)
-        reward_delta = abs(mean_reward - self.gt_mean_reward)
-        rel_reward_delta = reward_delta / self.gt_mean_reward
+        reward_delta = abs(mean_reward - self.gt_expected_reward)
+        rel_reward_delta = reward_delta / self.gt_expected_reward
         return {
             "mean_reward": mean_reward,
             "reward_delta": reward_delta,

@@ -112,7 +112,7 @@ class TrainState(NamedTuple):
     exploration_schedule: optax.Schedule
     eval_info: dict
     reward_module: gfnx.GeneralHypergridRewardModule
-    reward_params: chex.Array
+    reward_params: gfnx.HypergridRewardParams
 
 
 @eqx.filter_jit
@@ -176,15 +176,14 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         # Step 1. Compute the Q-value
         policy_outputs = jax.vmap(model)(transitions.obs)
         invalid_mask = env.get_invalid_mask_batch(transitions.state, env_params)
+        valid_mask = jnp.logical_not(invalid_mask)
         if train_state.config.agent.dueling:
             raw_advantage = policy_outputs["unmasked_advantage_logits"]
             value = policy_outputs["value_logits"]
-            advantage = gfnx.utils.mask_logits(raw_advantage, invalid_mask)
-            qvalue = value + jax.nn.log_softmax(advantage, axis=-1)
+            qvalue = value + jax.nn.log_softmax(raw_advantage, where=valid_mask, axis=-1)
         else:
             qvalue = policy_outputs["raw_qvalue_logits"]
-            qvalue = gfnx.utils.mask_logits(qvalue, invalid_mask)
-            value = jax.nn.logsumexp(qvalue, axis=-1)
+            value = jax.nn.logsumexp(qvalue, where=valid_mask, axis=-1)
 
         qvalue = jnp.take_along_axis(
             qvalue, jnp.expand_dims(transitions.action, axis=-1), axis=-1
@@ -194,18 +193,19 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         # Step 2.1: Compute the target Q-value
         target_policy_outputs = jax.vmap(target_model)(transitions.next_obs)
         next_invalid_actions_mask = env.get_invalid_mask_batch(transitions.next_state, env_params)
+        next_valid_mask = jnp.logical_not(next_invalid_actions_mask)
         if train_state.config.agent.dueling:
             raw_next_advantage = target_policy_outputs["unmasked_advantage_logits"]
             target_next_value = target_policy_outputs["value_logits"]
-            next_advantage = gfnx.utils.mask_logits(raw_next_advantage, next_invalid_actions_mask)
-            target_next_qvalue = target_next_value + jax.nn.log_softmax(next_advantage, axis=-1)
+            target_next_qvalue = target_next_value + jax.nn.log_softmax(
+                raw_next_advantage, where=next_valid_mask, axis=-1
+            )
             target_next_value = target_next_value.squeeze(-1)  # should be (N,)
         else:
             target_next_qvalue = target_policy_outputs["raw_qvalue_logits"]
-            target_next_qvalue = gfnx.utils.mask_logits(
-                target_next_qvalue, next_invalid_actions_mask
+            target_next_value = jax.nn.logsumexp(
+                target_next_qvalue, where=next_valid_mask, axis=-1
             )
-            target_next_value = jax.nn.logsumexp(target_next_qvalue, axis=-1)
 
         # Step 2.2: Compute intermidiate rewards.
         bwd_logits = jnp.zeros(
@@ -349,7 +349,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     # Initialize the environment and its inner parameters
     env = gfnx.environment.HypergridEnvironment(dim=cfg.environment.dim, side=cfg.environment.side)
     env_params = env.init(env_init_key)
-    reward_params = reward_module.init(env_init_key, env.get_init_state())
+    reward_params = reward_module.init(env_init_key, env.reset())
 
     rng_key, net_init_key = jax.random.split(rng_key)
     # Initialize the network

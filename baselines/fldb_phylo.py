@@ -34,7 +34,6 @@ from gfnx.metrics import (
 from gfnx.reward.phylogenetic_tree import PhyloTreeRewardModule
 from gfnx.utils import (
     ExplorationState,
-    apply_epsilon_greedy,
     create_exploration_schedule,
     get_phylo_initialization_args,
 )
@@ -217,7 +216,7 @@ class TrainState(NamedTuple):
     learning_rate_schedule: optax.Schedule
     eval_info: dict
     reward_module: PhyloTreeRewardModule
-    reward_params: chex.Array
+    reward_params: gfnx.PhyloTreeRewardParams
 
 
 def get_policy_fn(
@@ -238,7 +237,8 @@ def get_policy_fn(
         )
         if use_exploration:
             epsilon = exploration_state.schedule(exploration_state.step)
-            logits = apply_epsilon_greedy(eps_key, logits, epsilon)
+            do_explore = jax.random.uniform(eps_key) < epsilon
+            logits = jnp.where(do_explore, jnp.zeros_like(logits), logits)
         return logits, policy_outputs
 
     return policy_fn
@@ -439,7 +439,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     reward_module = PhyloTreeRewardModule(**reward_kwargs)
     env = PhyloTreeEnvironment(**env_kwargs)
     env_params = env.init(env_init_key)
-    reward_params = reward_module.init(env_init_key, env.get_init_state())
+    reward_params = reward_module.init(env_init_key, env.reset())
 
     rng_key, net_init_key = jax.random.split(rng_key)
     # Initialize the network

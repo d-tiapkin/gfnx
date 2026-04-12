@@ -2,11 +2,18 @@ import chex
 import jax
 import jax.numpy as jnp
 
-from ..base import BaseRewardModule, TLogReward, TReward, TRewardParams
+from ..base import BaseRewardModule, BaseRewardParams, TLogReward, TReward
 from ..environment import PhyloTreeEnvParams, PhyloTreeEnvState
 
 
-class PhyloTreeRewardModule(BaseRewardModule[PhyloTreeEnvState, PhyloTreeEnvParams]):
+@chex.dataclass(frozen=True)
+class PhyloTreeRewardParams(BaseRewardParams):
+    pass
+
+
+class PhyloTreeRewardModule(
+    BaseRewardModule[PhyloTreeEnvState, PhyloTreeEnvParams, PhyloTreeRewardParams]
+):
     """
     Reward module for phylogenetic trees using exponential reward function.
     R(x) = exp((offset - total_mutations) / scale)
@@ -20,9 +27,11 @@ class PhyloTreeRewardModule(BaseRewardModule[PhyloTreeEnvState, PhyloTreeEnvPara
         # TODO: check delta score in original paper
         self._offset = (C / scale) / num_nodes
 
-    def init(self, rng_key: chex.PRNGKey, dummy_state: PhyloTreeEnvState) -> TRewardParams:
+    def init(
+        self, rng_key: chex.PRNGKey, dummy_state: PhyloTreeEnvState
+    ) -> PhyloTreeRewardParams:
         """Initialize reward parameters"""
-        return {}  # No parameters for this reward
+        return PhyloTreeRewardParams()
 
     def _get_mutations(
         self,
@@ -60,7 +69,7 @@ class PhyloTreeRewardModule(BaseRewardModule[PhyloTreeEnvState, PhyloTreeEnvPara
     def log_reward(
         self,
         state: PhyloTreeEnvState,
-        reward_params,
+        reward_params: PhyloTreeRewardParams,
     ) -> TLogReward:
         """Compute log reward for a single state: (C - total_mutations) / scale"""
         total_mutations = self._get_mutations(state)
@@ -69,7 +78,7 @@ class PhyloTreeRewardModule(BaseRewardModule[PhyloTreeEnvState, PhyloTreeEnvPara
     def reward(
         self,
         state: PhyloTreeEnvState,
-        reward_params,
+        reward_params: PhyloTreeRewardParams,
     ) -> TReward:
         """Compute reward for a single state: exp((C - total_mutations) / scale)"""
         return jnp.exp(self.log_reward(state, reward_params))

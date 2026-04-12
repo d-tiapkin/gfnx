@@ -107,7 +107,7 @@ class TrainState(NamedTuple):
     env: gfnx.AMPEnvironment
     env_params: chex.Array
     reward_module: gfnx.EqxProxyAMPRewardModule
-    reward_params: chex.Array
+    reward_params: gfnx.AMPRewardParams
     model: TransformerPolicy
     logZ: chex.Array  # Added logZ here
     optimizer: optax.GradientTransformation
@@ -380,7 +380,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     # Initialize the environment and its inner parameters
     env = gfnx.AMPEnvironment()
     env_params = env.init(env_init_key)
-    reward_params = reward_module.init(env_init_key, env.get_init_state())
+    reward_params = reward_module.init(env_init_key, env.reset())
 
     rng_key, net_init_key = jax.random.split(rng_key)
     # Initialize the network

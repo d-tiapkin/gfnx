@@ -104,7 +104,7 @@ class TrainState(NamedTuple):
     env: gfnx.AMPEnvironment
     env_params: chex.Array
     reward_module: gfnx.EqxProxyAMPRewardModule
-    reward_params: chex.Array
+    reward_params: gfnx.AMPRewardParams
     model: TransformerPolicy
     optimizer: optax.GradientTransformation
     opt_state: optax.OptState
@@ -149,8 +149,8 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         lambda x: x.reshape((-1,) + x.shape[2:]),
         jax.vmap(gfnx.utils.split_traj_to_transitions)(traj_data),
     )
-    T_steps = transitions.done.shape[0] // num_envs
-    traj_rewards_flat = jnp.repeat(log_rewards, T_steps)  # [B*T]
+    t_steps = transitions.done.shape[0] // num_envs
+    traj_rewards_flat = jnp.repeat(log_rewards, t_steps)  # [B*T]
     bwd_actions = env.get_backward_action_batch(
         transitions.state,
         transitions.action,
@@ -207,8 +207,8 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             jnp.where(transitions.pad, 0.0, target),
         )
 
-        leaf_loss = (loss * done).sum() / (jnp.logical_and(transition, done)).sum()
-        flow_loss = (loss * not_done).sum() / (jnp.logical_and(transition, not_done)).sum()
+        leaf_loss = gfnx.utils.masked_mean(loss, jnp.logical_and(transition, done))
+        flow_loss = gfnx.utils.masked_mean(loss, jnp.logical_and(transition, not_done))
 
         return leaf_loss * 25 + flow_loss
 
@@ -311,7 +311,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     # Initialize the environment and its inner parameters
     env = gfnx.AMPEnvironment()
     env_params = env.init(env_init_key)
-    reward_params = reward_module.init(env_init_key, env.get_init_state())
+    reward_params = reward_module.init(env_init_key, env.reset())
 
     rng_key, net_init_key = jax.random.split(rng_key)
     # Initialize the network

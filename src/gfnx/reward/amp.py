@@ -1,15 +1,21 @@
 import os
+from typing import Any
 
 import chex
 import jax
 import jax.numpy as jnp
 
-from ..base import BaseRewardModule, TLogReward, TReward, TRewardParams
+from ..base import BaseRewardModule, BaseRewardParams, TLogReward, TReward
 from ..environment import AMPEnvParams, AMPEnvState
 from ..utils.proteins import PROTEINS_FULL_ALPHABET
 
 
-class EqxProxyAMPRewardModule(BaseRewardModule[AMPEnvState, AMPEnvParams]):
+@chex.dataclass(frozen=True)
+class AMPRewardParams(BaseRewardParams):
+    model_params: Any
+
+
+class EqxProxyAMPRewardModule(BaseRewardModule[AMPEnvState, AMPEnvParams, AMPRewardParams]):
     def __init__(
         self,
         proxy_config_path: str,
@@ -36,7 +42,7 @@ class EqxProxyAMPRewardModule(BaseRewardModule[AMPEnvState, AMPEnvParams]):
         self.reward_exponent = reward_exponent
         self.min_reward = min_reward
 
-    def init(self, rng_key: chex.PRNGKey, dummy_state: AMPEnvState) -> TRewardParams:
+    def init(self, rng_key: chex.PRNGKey, dummy_state: AMPEnvState) -> AMPRewardParams:
         # Lazy imports to avoid importing equinox in the main module
         import equinox as eqx
         import orbax.checkpoint as ocp
@@ -59,16 +65,16 @@ class EqxProxyAMPRewardModule(BaseRewardModule[AMPEnvState, AMPEnvParams]):
         self.model_static = model_static
         self.offset = model.offset
 
-        return {"model_params": model_params}
+        return AMPRewardParams(model_params=model_params)
 
-    def log_reward(self, state: AMPEnvState, reward_params: TRewardParams) -> TLogReward:
+    def log_reward(self, state: AMPEnvState, reward_params: AMPRewardParams) -> TLogReward:
         return jnp.log(self.reward(state, reward_params))
 
-    def reward(self, state: AMPEnvState, reward_params: TRewardParams) -> TReward:
+    def reward(self, state: AMPEnvState, reward_params: AMPRewardParams) -> TReward:
         # Lazy imports to avoid importing equinox in the main module
         import equinox as eqx
 
-        model = eqx.combine(reward_params["model_params"], self.model_static)
+        model = eqx.combine(reward_params.model_params, self.model_static)
         reward = model(state.tokens, enable_dropout=False, key=None)
         reward = jnp.clip(
             jnp.pow(jax.nn.sigmoid(reward), self.reward_exponent),

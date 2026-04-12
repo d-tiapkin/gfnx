@@ -7,14 +7,21 @@ import chex
 import jax.numpy as jnp
 import numpy as np
 
-from ..base import BaseRewardModule, TLogReward, TReward
+from ..base import BaseRewardModule, BaseRewardParams, TLogReward, TReward
 from ..environment import (
     TFBind8EnvParams,
     TFBind8EnvState,
 )
 
 
-class TFBind8RewardModule(BaseRewardModule[TFBind8EnvState, TFBind8EnvParams]):
+@chex.dataclass(frozen=True)
+class TFBind8RewardParams(BaseRewardParams):
+    rewards: chex.Array
+
+
+class TFBind8RewardModule(
+    BaseRewardModule[TFBind8EnvState, TFBind8EnvParams, TFBind8RewardParams]
+):
     def __init__(
         self,
         nchar: int = 4,
@@ -32,7 +39,7 @@ class TFBind8RewardModule(BaseRewardModule[TFBind8EnvState, TFBind8EnvParams]):
         self.reward_exponent = reward_exponent
         self.reward_scale = reward_scale
 
-    def init(self, rng_key: chex.PRNGKey, dummy_state: TFBind8EnvState) -> None:
+    def init(self, rng_key: chex.PRNGKey, dummy_state: TFBind8EnvState) -> TFBind8RewardParams:
         # Make a full loop to get the values for all possible states
 
         # Generate all possible values of characters
@@ -51,14 +58,18 @@ class TFBind8RewardModule(BaseRewardModule[TFBind8EnvState, TFBind8EnvParams]):
         values = jnp.pow(values_raw, self.reward_exponent)
         values = values * self.reward_scale / values.max()
         values = jnp.clip(values, min=self.min_reward)
-        return {"rewards": values}  # Dict with all possible values
+        return TFBind8RewardParams(rewards=values)
 
-    def reward(self, state: TFBind8EnvState, reward_params) -> TReward:
+    def reward(
+        self, state: TFBind8EnvState, reward_params: TFBind8RewardParams
+    ) -> TReward:
         powers_array = jnp.array([
             self.nchar ** (self.max_length - i - 1) for i in range(self.max_length)
         ])
         index = jnp.sum(state.tokens * powers_array)
-        return reward_params["rewards"][index]
+        return reward_params.rewards[index]
 
-    def log_reward(self, state: TFBind8EnvState, reward_params) -> TLogReward:
+    def log_reward(
+        self, state: TFBind8EnvState, reward_params: TFBind8RewardParams
+    ) -> TLogReward:
         return jnp.log(self.reward(state, reward_params))

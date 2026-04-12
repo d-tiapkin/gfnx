@@ -58,7 +58,7 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
     def name(self) -> str:
         return "PhyloTree-v0"
 
-    def get_init_state(self) -> EnvState:
+    def reset(self) -> EnvState:
         """Returns a single initial state."""
         sequences = jnp.concatenate(
             [
@@ -89,9 +89,9 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
             sequence_length=self.sequence_length,
         )
 
-    def _transition(
+    def step(
         self, state: EnvState, action: TAction, env_params: EnvParams
-    ) -> tuple[EnvState, TDone, dict[str, Any]]:
+    ) -> tuple[chex.Array, EnvState, TDone, dict[str, Any]]:
         left = state.to_root[self.lefts[action]]
         right = state.to_root[self.rights[action]]
         overlap = jnp.bitwise_and(state.sequences[left], state.sequences[right])
@@ -120,11 +120,16 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
         next_state = jax.tree.map(
             lambda p, a: jnp.where(state.is_terminal, p, a), next_pad, next_active
         )
-        return next_state, next_state.is_terminal, {}
+        return (
+            self.get_obs(next_state, env_params),
+            next_state,
+            jnp.astype(next_state.is_terminal, jnp.bool),
+            {},
+        )
 
-    def _backward_transition(
+    def backward_step(
         self, state: EnvState, backward_action: TAction, env_params: EnvParams
-    ) -> tuple[EnvState, chex.Array, dict[str, Any]]:
+    ) -> tuple[chex.Array, EnvState, TDone, dict[str, Any]]:
         root = state.to_root[backward_action]
         left_child = state.left_child[root]
         right_child = state.right_child[root]
@@ -235,7 +240,12 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
         prev_state = jax.tree.map(
             lambda p, n: jnp.where(state.is_initial, p, n), init_pad, non_initial
         )
-        return prev_state, prev_state.is_initial, {}
+        return (
+            self.get_obs(prev_state, env_params),
+            prev_state,
+            jnp.astype(prev_state.is_initial, jnp.bool),
+            {},
+        )
 
     def get_obs(self, state: EnvState, env_params: EnvParams) -> chex.ArrayTree:
         """Returns observation for a single state."""

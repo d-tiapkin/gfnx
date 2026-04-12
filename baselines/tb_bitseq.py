@@ -114,7 +114,7 @@ class TrainState(NamedTuple):
     env: gfnx.BitseqEnvironment
     env_params: chex.Array
     reward_module: gfnx.BitseqRewardModule
-    reward_params: chex.Array
+    reward_params: gfnx.BitseqRewardParams
     model: TransformerPolicy
     logZ: chex.Array  # Added logZ for TB
     optimizer: optax.GradientTransformation
@@ -343,7 +343,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     # Initialize the environment and its inner parameters
     env = gfnx.BitseqEnvironment(n=cfg.environment.n, k=cfg.environment.k)
     env_params = env.init(env_init_key)
-    reward_params = reward_module.init(env_init_key, env.get_init_state())
+    reward_params = reward_module.init(env_init_key, env.reset())
 
     rng_key, net_init_key = jax.random.split(rng_key)
     # Initialize the network
@@ -417,13 +417,13 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     eval_init_key, correlation_init_key = jax.random.split(eval_init_key)
     binary_test_set = gfnx.utils.bitseq.construct_binary_test_set(
-        correlation_init_key, reward_params["mode_set"]
+        correlation_init_key, reward_params.mode_set
     )
     vector_tokenize = jax.vmap(lambda x: gfnx.utils.bitseq.tokenize(x, env.k))
     test_set_tokens = vector_tokenize(binary_test_set)
     test_set_states = gfnx.BitseqEnvState.from_tokens(test_set_tokens)
     # Initialize the metrics
-    mode_set = reward_params["mode_set"]
+    mode_set = reward_params.mode_set
     mode_set_tokens = vector_tokenize(mode_set)
     modes_states = gfnx.BitseqEnvState.from_tokens(mode_set_tokens)
 

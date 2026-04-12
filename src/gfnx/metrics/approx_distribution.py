@@ -167,7 +167,7 @@ class ApproxDistributionMetricsModule(BaseMetricsModule):
                 - empirical_distribution: Initial uniform distribution
                 - replay_buffer: Empty buffer ready to collect states
         """
-        _, fake_single_state = self.env.reset(args.env_params)
+        fake_single_state = self.env.reset()
         # Replay buffer takes only shapes, but not values
         replay_buffer_state = self.buffer_module.init(fake_single_state)
         true_distribution = self.env.get_true_distribution(

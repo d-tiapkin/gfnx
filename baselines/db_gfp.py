@@ -104,7 +104,7 @@ class TrainState(NamedTuple):
     env: gfnx.GFPEnvironment
     env_params: chex.Array
     reward_module: gfnx.EqxProxyGFPRewardModule
-    reward_params: chex.Array
+    reward_params: gfnx.GFPRewardParams
     model: TransformerPolicy
     optimizer: optax.GradientTransformation
     opt_state: optax.OptState
@@ -158,8 +158,8 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     log_rewards = jax.vmap(train_state.reward_module.log_reward, in_axes=(0, None))(
         final_states, train_state.reward_params
     )
-    T_steps = transitions.done.shape[0] // num_envs
-    traj_rewards_flat = jnp.repeat(log_rewards, T_steps)  # [B*T]
+    t_steps = transitions.done.shape[0] // num_envs
+    traj_rewards_flat = jnp.repeat(log_rewards, t_steps)  # [B*T]
     rl_reward = log_pb_traj + log_rewards + info["entropy"]
 
     # Step 2. Compute the loss
@@ -292,7 +292,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     # Initialize the environment and its inner parameters
     env = gfnx.GFPEnvironment()
     env_params = env.init(env_init_key)
-    reward_params = reward_module.init(env_init_key, env.get_init_state())
+    reward_params = reward_module.init(env_init_key, env.reset())
 
     rng_key, net_init_key = jax.random.split(rng_key)
     # Initialize the network

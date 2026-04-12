@@ -103,7 +103,6 @@ class TransformerPolicy(eqx.Module):
 
         forward_logits = jnp.ravel(jax.vmap(self.forward_pooler)(encoded_obs[1:]))
         flow = self.flow_pooler(encoded_obs[0])
-        # jax.debug.print("hello {bar}", bar=flow.shape)
 
         if self.train_backward_policy:
             backward_logits = jnp.ravel(jax.vmap(self.backward_pooler)(encoded_obs[1:]))
@@ -124,7 +123,7 @@ class TrainState(NamedTuple):
     env: gfnx.BitseqEnvironment
     env_params: chex.Array
     reward_module: gfnx.BitseqRewardModule
-    reward_params: chex.Array
+    reward_params: gfnx.BitseqRewardParams
     model: TransformerPolicy
     optimizer: optax.GradientTransformation
     opt_state: optax.OptState
@@ -169,8 +168,8 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         lambda x: x.reshape((-1,) + x.shape[2:]),
         jax.vmap(gfnx.utils.split_traj_to_transitions)(traj_data),
     )
-    T_steps = transitions.done.shape[0] // num_envs
-    traj_rewards_flat = jnp.repeat(log_rewards, T_steps)  # [B*T]
+    t_steps = transitions.done.shape[0] // num_envs
+    traj_rewards_flat = jnp.repeat(log_rewards, t_steps)  # [B*T]
     bwd_actions = env.get_backward_action_batch(
         transitions.state,
         transitions.action,
@@ -322,7 +321,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     # Initialize the environment and its inner parameters
     env = gfnx.BitseqEnvironment(n=cfg.environment.n, k=cfg.environment.k)
     env_params = env.init(env_init_key)
-    reward_params = reward_module.init(env_init_key, env.get_init_state())
+    reward_params = reward_module.init(env_init_key, env.reset())
 
     rng_key, net_init_key = jax.random.split(rng_key)
     # Initialize the network
@@ -379,13 +378,13 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     eval_init_key, correlation_init_key = jax.random.split(eval_init_key)
     binary_test_set = gfnx.utils.bitseq.construct_binary_test_set(
-        correlation_init_key, reward_params["mode_set"]
+        correlation_init_key, reward_params.mode_set
     )
     vector_tokenize = jax.vmap(lambda x: gfnx.utils.bitseq.tokenize(x, env.k))
     test_set_tokens = vector_tokenize(binary_test_set)
     test_set_states = gfnx.BitseqEnvState.from_tokens(test_set_tokens)
     # Initialize the metrics
-    mode_set = reward_params["mode_set"]
+    mode_set = reward_params.mode_set
     mode_set_tokens = vector_tokenize(mode_set)
     modes_states = gfnx.BitseqEnvState.from_tokens(mode_set_tokens)
 

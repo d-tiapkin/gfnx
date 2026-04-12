@@ -25,7 +25,6 @@ performance tips when running on GPU, i.e., XLA flags.
 import csv
 import logging
 from pathlib import Path
-from typing import NamedTuple
 
 import chex
 import equinox as eqx
@@ -88,13 +87,13 @@ class MLPPolicy(eqx.Module):
         }
 
 
-# Dynamic (JAX array) part of the training state — this is what gets vmapped over seeds.
-class TrainStateParams(NamedTuple):
+@chex.dataclass
+class TrainStateParams:
     rng_key: chex.PRNGKey
     model_params: chex.Array  # eqx.filter(model, eqx.is_array)
     logZ: chex.Array
     opt_state: optax.OptState
-    reward_params: chex.Array
+    reward_params: gfnx.HypergridRewardParams
 
 
 @hydra.main(config_path="configs/", config_name="tb_hypergrid_multiseed", version_base=None)
@@ -104,7 +103,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     env_init_key = jax.random.PRNGKey(cfg.env_init_seed)
 
     # Build reward module and environment (shared across seeds — static)
-    reward_module_factory = {
+    reward_module_factory : gfnx.GeneralHypergridRewardModule = {
         "easy": gfnx.EasyHypergridRewardModule,
         "hard": gfnx.HardHypergridRewardModule,
     }[cfg.environment.reward]
@@ -169,7 +168,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     )
 
     # Canonical reward_params for metrics init (same for all seeds)
-    canonical_reward_params = reward_module.init(env_init_key, env.get_init_state())
+    canonical_reward_params = reward_module.init(env_init_key, env.reset())
     init_metrics_state = metrics_module.init(
         jax.random.key(0),
         metrics_module.InitArgs(env_params=env_params, reward_params=canonical_reward_params),
@@ -196,7 +195,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         )
         model_params = eqx.filter(model, eqx.is_array)
         logZ = jnp.array(0.0)
-        reward_params = reward_module.init(reward_key, env.get_init_state())
+        reward_params = reward_module.init(reward_key, env.reset())
         opt_state = optimizer.init({"model_params": model_params, "logZ": template_logZ})
         return TrainStateParams(
             rng_key=rng_key,
@@ -323,10 +322,25 @@ def run_experiment(cfg: OmegaConf) -> None:
     @jax.jit
     def run_all_seeds(all_params, all_metrics):
         def run_one_seed(params, metrics):
-            _, metric_history = jax.lax.scan(
+            final_carry, metric_history = jax.lax.scan(
                 epoch_fn, (params, metrics), jnp.arange(cfg.num_evals)
             )
-            return metric_history
+            # Evaluate the final checkpoint — the scan evaluates *before* each training
+            # chunk, so the very last chunk would otherwise go unevaluated.
+            final_params, final_metrics = final_carry
+            final_processed = metrics_module.process(
+                final_metrics,
+                jax.random.key(0),
+                metrics_module.ProcessArgs(
+                    policy_params=final_params.model_params, env_params=env_params
+                ),
+            )
+            final_eval = metrics_module.get(final_processed)
+            # Append final eval: history shape [num_evals, ...] → [num_evals+1, ...]
+            return jax.tree.map(
+                lambda hist, fin: jnp.append(hist, fin[None], axis=0),
+                metric_history, final_eval,
+            )
 
         return jax.vmap(run_one_seed)(all_params, all_metrics)
 
@@ -334,8 +348,10 @@ def run_experiment(cfg: OmegaConf) -> None:
         f"Starting training: {cfg.num_seeds} seeds × {cfg.num_train_steps} steps, "
         f"{cfg.num_evals} evals every {steps_per_eval} steps"
     )
-    # all_histories: dict[str, Array[num_seeds, num_evals]]
+    # all_histories: dict[str, Array[num_seeds, num_evals+1]]
+    # (first num_evals entries are pre-chunk evals; last entry is post-final-chunk)
     all_histories = jax.block_until_ready(run_all_seeds(all_init_params, all_init_metrics))
+    num_eval_rows = cfg.num_evals + 1  # includes the final post-training evaluation
 
     # -------------------------------------------------------------------------
     # Log metric history and save per-metric CSVs
@@ -348,7 +364,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         with csv_path.open("w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["step"] + seed_cols)
-            for i in range(cfg.num_evals):
+            for i in range(num_eval_rows):
                 step = i * steps_per_eval
                 row = [step] + [float(values[s, i]) for s in range(cfg.num_seeds)]
                 writer.writerow(row)
