@@ -37,9 +37,7 @@ class QM9SmallRewardModule(
         self.reward_exponent = reward_exponent
         self.reward_scale = reward_scale
 
-    def init(
-        self, rng_key: chex.PRNGKey, dummy_state: QM9SmallEnvState
-    ) -> QM9SmallRewardParams:
+    def init(self, rng_key: chex.PRNGKey, dummy_state: QM9SmallEnvState) -> QM9SmallRewardParams:
         # Source: https://github.com/maxwshen/gflownet/blob/main/datasets/qm9str/block_qm9str_v1_s5.pkl
         with open("proxy/weights/qm9_small/block_qm9str_v1_s5.pkl", "rb") as f:
             oracle_d = pickle.load(f)
@@ -53,9 +51,7 @@ class QM9SmallRewardModule(
         values = values * self.reward_scale / values.max()
         return QM9SmallRewardParams(rewards=values)
 
-    def reward(
-        self, state: QM9SmallEnvState, reward_params: QM9SmallRewardParams
-    ) -> TReward:
+    def reward(self, state: QM9SmallEnvState, reward_params: QM9SmallRewardParams) -> TReward:
         powers_array = jnp.array([
             self.nchar ** (self.max_length - i - 1) for i in range(self.max_length)
         ])

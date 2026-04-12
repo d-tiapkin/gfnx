@@ -27,9 +27,7 @@ class PhyloTreeRewardModule(
         # TODO: check delta score in original paper
         self._offset = (C / scale) / num_nodes
 
-    def init(
-        self, rng_key: chex.PRNGKey, dummy_state: PhyloTreeEnvState
-    ) -> PhyloTreeRewardParams:
+    def init(self, rng_key: chex.PRNGKey, dummy_state: PhyloTreeEnvState) -> PhyloTreeRewardParams:
         """Initialize reward parameters"""
         return PhyloTreeRewardParams()
 

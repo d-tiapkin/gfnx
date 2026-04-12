@@ -310,7 +310,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     cur_eps = train_state.exploration_schedule(idx)
 
     # Define the policy function suitable for gfnx.utils.forward_rollout
-    def fwd_policy_fn(rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params) -> chex.Array:
+    def fwd_policy_fn(
+        rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
+    ) -> tuple[chex.Array, dict]:
         policy = eqx.combine(policy_params, policy_static)
         # GNNPolicy is internally batched: jraph's graph-packing pads edges to a
         # fixed-size pool, which requires knowing the batch size up front. Unlike

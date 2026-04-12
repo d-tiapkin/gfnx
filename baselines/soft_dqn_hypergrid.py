@@ -129,7 +129,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
 
     cur_epsilon = train_state.exploration_schedule(idx)
 
-    def fwd_policy_fn(rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params) -> chex.Array:
+    def fwd_policy_fn(
+        rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
+    ) -> tuple[chex.Array, dict]:
         policy = eqx.combine(policy_params, policy_static)
         policy_outputs = policy(env_obs)
         if train_state.config.agent.dueling:

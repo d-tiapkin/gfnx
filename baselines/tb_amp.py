@@ -143,7 +143,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         fwd_rng_key: chex.PRNGKey,
         env_obs: gfnx.TObs,
         current_policy_params,
-    ) -> chex.Array:
+    ) -> tuple[chex.Array, dict]:
         current_model = eqx.combine(current_policy_params, policy_static)
 
         dropout_key, exploration_key = jax.random.split(fwd_rng_key)

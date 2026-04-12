@@ -27,9 +27,7 @@ class BaseDAGLikelihood(Generic[TDAGLikelihoodParams]):
         """
         raise NotImplementedError
 
-    def log_prob(
-        self, state: DAGEnvState, likelihood_params: TDAGLikelihoodParams
-    ) -> TLogReward:
+    def log_prob(self, state: DAGEnvState, likelihood_params: TDAGLikelihoodParams) -> TLogReward:
         """Computes the log-likelihood of the data given the state - graph G:
 
             log P(D | G) = sum_j LocalScore(X_j | Pa_G(X_j))
@@ -75,11 +73,10 @@ class BaseDAGLikelihood(Generic[TDAGLikelihoodParams]):
         _source, target = jnp.divmod(action, env_params.num_variables)
         parents = state.adjacency_matrix[:, target]  # [num_variables]
         next_parents = next_state.adjacency_matrix[:, target]  # [num_variables]
-        return self._local_score(
-            target[None], next_parents[None], likelihood_params
-        ).squeeze() - self._local_score(
-            target[None], parents[None], likelihood_params
-        ).squeeze()
+        return (
+            self._local_score(target[None], next_parents[None], likelihood_params).squeeze()
+            - self._local_score(target[None], parents[None], likelihood_params).squeeze()
+        )
 
     def _local_score(
         self,
@@ -101,9 +98,7 @@ class BaseDAGLikelihood(Generic[TDAGLikelihoodParams]):
 
 
 class ZeroScore(BaseDAGLikelihood[BaseDAGLikelihoodParams]):
-    def init(
-        self, rng_key: chex.PRNGKey, dummy_state: DAGEnvState
-    ) -> BaseDAGLikelihoodParams:
+    def init(self, rng_key: chex.PRNGKey, dummy_state: DAGEnvState) -> BaseDAGLikelihoodParams:
         return BaseDAGLikelihoodParams()
 
     def delta_score(
@@ -143,9 +138,7 @@ class LinearGaussianScore(BaseDAGLikelihood[LinearGaussianScoreParams]):
         self.prior_scale = prior_scale
         self.obs_scale = obs_scale
 
-    def init(
-        self, rng_key: chex.PRNGKey, dummy_state: DAGEnvState
-    ) -> LinearGaussianScoreParams:
+    def init(self, rng_key: chex.PRNGKey, dummy_state: DAGEnvState) -> LinearGaussianScoreParams:
         return LinearGaussianScoreParams(data=self.data)
 
     def _local_score(

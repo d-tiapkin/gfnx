@@ -142,7 +142,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     cur_eps = train_state.exploration_schedule(idx)
 
     # Define the policy function suitable for gfnx.utils.forward_rollout
-    def fwd_policy_fn(rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params) -> chex.Array:
+    def fwd_policy_fn(
+        rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
+    ) -> tuple[chex.Array, dict]:
         rng_key, explore_key, dropout_key = jax.random.split(rng_key, 3)
         policy = eqx.combine(policy_params, policy_static)
         policy_outputs = policy(env_obs, enable_dropout=True, key=dropout_key)
@@ -392,7 +394,9 @@ def run_experiment(cfg: OmegaConf) -> None:
     # Initialize the backward policy function for correlation computation
     policy_static = eqx.filter(model, eqx.is_array, inverse=True)
 
-    def bwd_policy_fn(rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params) -> chex.Array:
+    def bwd_policy_fn(
+            rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
+    ) -> tuple[chex.Array, dict]:
         del rng_key
         policy = eqx.combine(policy_params, policy_static)
         policy_outputs = policy(env_obs)

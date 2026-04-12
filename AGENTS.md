@@ -434,6 +434,7 @@ seeds = jnp.arange(cfg.num_seeds)
 all_init_params = jax.vmap(make_init_params)(seeds)  # batched initialization
 
 
+# Simplified, actual version is more complex
 @jax.jit
 def run_all_seeds(all_init_params):
     return jax.vmap(lambda init: jax.lax.fori_loop(0, cfg.num_train_steps, train_step, init))(

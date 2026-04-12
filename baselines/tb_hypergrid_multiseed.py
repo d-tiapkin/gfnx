@@ -103,7 +103,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     env_init_key = jax.random.PRNGKey(cfg.env_init_seed)
 
     # Build reward module and environment (shared across seeds — static)
-    reward_module_factory : gfnx.GeneralHypergridRewardModule = {
+    reward_module_factory: gfnx.GeneralHypergridRewardModule = {
         "easy": gfnx.EasyHypergridRewardModule,
         "hard": gfnx.HardHypergridRewardModule,
     }[cfg.environment.reward]
@@ -154,7 +154,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     # Forward policy function for exact distribution computation (uses closure)
     def fwd_policy_fn_for_metrics(
         fwd_rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
-    ) -> chex.Array:
+    ) -> tuple[chex.Array, dict]:
         current_model = eqx.combine(policy_params, policy_static)
         policy_outputs = current_model(env_obs)
         return policy_outputs["forward_logits"], policy_outputs
@@ -215,7 +215,7 @@ def run_experiment(cfg: OmegaConf) -> None:
 
         def fwd_policy_fn(
             fwd_rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
-        ) -> chex.Array:
+        ) -> tuple[chex.Array, dict]:
             current_model = eqx.combine(policy_params, policy_static)
             policy_outputs = current_model(env_obs)
             fwd_logits = policy_outputs["forward_logits"]
@@ -296,9 +296,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         processed = metrics_module.process(
             metrics_state,
             jax.random.key(0),
-            metrics_module.ProcessArgs(
-                policy_params=state.model_params, env_params=env_params
-            ),
+            metrics_module.ProcessArgs(policy_params=state.model_params, env_params=env_params),
         )
         eval_info = metrics_module.get(processed)
 
@@ -339,7 +337,8 @@ def run_experiment(cfg: OmegaConf) -> None:
             # Append final eval: history shape [num_evals, ...] → [num_evals+1, ...]
             return jax.tree.map(
                 lambda hist, fin: jnp.append(hist, fin[None], axis=0),
-                metric_history, final_eval,
+                metric_history,
+                final_eval,
             )
 
         return jax.vmap(run_one_seed)(all_params, all_metrics)

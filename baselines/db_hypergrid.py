@@ -131,7 +131,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     cur_epsilon = train_state.exploration_schedule(idx)
 
     # Define the policy function suitable for gfnx.utils.forward_rollout
-    def fwd_policy_fn(rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params) -> chex.Array:
+    def fwd_policy_fn(
+        rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
+    ) -> tuple[chex.Array, dict]:
         policy = eqx.combine(policy_params, policy_static)
         policy_outputs = policy(env_obs)
         do_explore = jax.random.bernoulli(rng_key, cur_epsilon)

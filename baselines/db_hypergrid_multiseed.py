@@ -295,9 +295,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         processed = metrics_module.process(
             metrics_state,
             jax.random.key(0),
-            metrics_module.ProcessArgs(
-                policy_params=state.model_params, env_params=env_params
-            ),
+            metrics_module.ProcessArgs(policy_params=state.model_params, env_params=env_params),
         )
         eval_info = metrics_module.get(processed)
 
@@ -338,7 +336,8 @@ def run_experiment(cfg: OmegaConf) -> None:
             # Append final eval: history shape [num_evals, ...] → [num_evals+1, ...]
             return jax.tree.map(
                 lambda hist, fin: jnp.append(hist, fin[None], axis=0),
-                metric_history, final_eval,
+                metric_history,
+                final_eval,
             )
 
         return jax.vmap(run_one_seed)(all_params, all_metrics)

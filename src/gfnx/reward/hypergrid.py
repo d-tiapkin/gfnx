@@ -16,13 +16,13 @@ class GeneralHypergridRewardModule(
     BaseRewardModule[HypergridEnvState, HypergridEnvParams, HypergridRewardParams]
 ):
     def __init__(
-            self,
-            R0: float = 1e-3,
-            R1: float = 0.5,
-            R2: float = 2.0,
-            side: int = 20,
-            min_reward: float = 1e-6
-        ) -> None:
+        self,
+        R0: float = 1e-3,
+        R1: float = 0.5,
+        R2: float = 2.0,
+        side: int = 20,
+        min_reward: float = 1e-6,
+    ) -> None:
         r"""
         General reward function for hypegrids, defined as
         $$
@@ -40,14 +40,10 @@ class GeneralHypergridRewardModule(
         self.side = side
         self.min_reward = min_reward
 
-    def init(
-        self, rng_key: chex.PRNGKey, dummy_state: HypergridEnvState
-    ) -> HypergridRewardParams:
+    def init(self, rng_key: chex.PRNGKey, dummy_state: HypergridEnvState) -> HypergridRewardParams:
         return HypergridRewardParams()
 
-    def reward(
-        self, state: HypergridEnvState, reward_params: HypergridRewardParams
-    ) -> TReward:
+    def reward(self, state: HypergridEnvState, reward_params: HypergridRewardParams) -> TReward:
         ax = jnp.abs(state.state / (self.side - 1) - 0.5)
         reward = (
             self.R0 + jnp.prod(ax > 0.25) * self.R1 + jnp.prod((ax < 0.4) * (ax > 0.3)) * self.R2

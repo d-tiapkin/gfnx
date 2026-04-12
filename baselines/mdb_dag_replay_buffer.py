@@ -301,8 +301,10 @@ class TrainState(NamedTuple):
     metrics_state: MultiMetricsState
     eval_info: dict
 
+
 def collect_step(
-    idx: int, train_state: TrainState,
+    idx: int,
+    train_state: TrainState,
 ) -> tuple[TrainState, dict[str, chex.Array]]:
     """Rollout trajectories and add transitions to the replay buffer."""
     rng_key, sample_traj_key = jax.random.split(train_state.rng_key)
@@ -312,9 +314,7 @@ def collect_step(
     env = train_state.env
     env_params = train_state.env_params
 
-    def fwd_policy_fn(
-        fwd_rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
-    ) -> chex.Array:
+    def fwd_policy_fn(fwd_rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params) -> chex.Array:
         policy = eqx.combine(policy_params, policy_static)
         # GNNPolicy expects a batch dimension: unsqueeze, call, then squeeze
         policy_outputs = jax.tree.map(lambda x: x.squeeze(0), policy(env_obs[None]))
@@ -342,7 +342,8 @@ def collect_step(
         jax.vmap(gfnx.utils.split_traj_to_transitions)(traj_data),
     )
     replay_buffer_state = train_state.replay_buffer.add(
-        train_state.replay_buffer_state, transitions,
+        train_state.replay_buffer_state,
+        transitions,
     )
 
     collect_info = {
@@ -358,21 +359,24 @@ def collect_step(
 
 
 def update_step(
-    idx: int, train_state: TrainState,
+    idx: int,
+    train_state: TrainState,
 ) -> tuple[TrainState, dict[str, chex.Array]]:
-    """Sample from replay buffer, compute MDB loss, and update model.
-    """
+    """Sample from replay buffer, compute MDB loss, and update model."""
     rng_key, sample_key = jax.random.split(train_state.rng_key)
     can_sample = train_state.replay_buffer.can_sample(
         train_state.replay_buffer_state,
     )
 
     transitions = train_state.replay_buffer.sample(
-        train_state.replay_buffer_state, sample_key,
+        train_state.replay_buffer_state,
+        sample_key,
     )
     bwd_actions = train_state.env.get_backward_action_batch(
-        transitions.state, transitions.action,
-        transitions.next_state, train_state.env_params,
+        transitions.state,
+        transitions.action,
+        transitions.next_state,
+        train_state.env_params,
     )
 
     def loss_fn(model: GNNPolicy) -> chex.Array:
@@ -397,7 +401,8 @@ def update_step(
         next_policy_outputs = train_state.target_model(transitions.next_obs)
         next_fwd_logits = next_policy_outputs["forward_logits"]
         next_fwd_invalid_mask = train_state.env.get_invalid_mask_batch(
-            transitions.next_state, train_state.env_params,
+            transitions.next_state,
+            train_state.env_params,
         )
         next_fwd_all_log_probs = jax.nn.log_softmax(
             next_fwd_logits, where=jnp.logical_not(next_fwd_invalid_mask), axis=-1
@@ -406,7 +411,8 @@ def update_step(
 
         bwd_logits = next_policy_outputs["backward_logits"]
         next_bwd_invalid_mask = train_state.env.get_invalid_backward_mask_batch(
-            transitions.next_state, train_state.env_params,
+            transitions.next_state,
+            train_state.env_params,
         )
         bwd_logprobs = gfnx.utils.compute_action_log_probs(
             bwd_logits, bwd_actions, next_bwd_invalid_mask
@@ -424,16 +430,18 @@ def update_step(
         error = jnp.where(done_or_pad, 0.0, error)
         return optax.huber_loss(error).sum() / jnp.logical_not(done_or_pad).sum()
 
-
     loss, grads = eqx.filter_value_and_grad(loss_fn)(train_state.model)
     updates, new_opt_state = train_state.optimizer.update(
-        grads, train_state.opt_state, eqx.filter(train_state.model, eqx.is_array),
+        grads,
+        train_state.opt_state,
+        eqx.filter(train_state.model, eqx.is_array),
     )
     new_model = eqx.apply_updates(train_state.model, updates)
 
     # Keep old state when buffer is not ready
     def select(new, old):
         return jax.tree.map(lambda n, o: jnp.where(can_sample, n, o), new, old)
+
     new_params, model_static = eqx.partition(new_model, eqx.is_array)
     old_params, _ = eqx.partition(train_state.model, eqx.is_array)
     model = eqx.combine(select(new_params, old_params), model_static)
@@ -454,12 +462,16 @@ def update_step(
         "grad_norm": jnp.where(can_sample, optax.tree_utils.tree_l2_norm(grads), jnp.nan),
     }
     return train_state._replace(
-        rng_key=rng_key, model=model, target_model=target_model, opt_state=opt_state,
+        rng_key=rng_key,
+        model=model,
+        target_model=target_model,
+        opt_state=opt_state,
     ), update_info
 
 
 def eval_step(
-    idx: int, train_state: TrainState,
+    idx: int,
+    train_state: TrainState,
 ) -> TrainState:
     """Compute evaluation metrics if on an eval step, otherwise pass through."""
     _, eval_rng_key = jax.random.split(train_state.rng_key)
@@ -511,18 +523,12 @@ def train_step(
     train_state, update_info = update_step(idx, train_state)
     train_state = eval_step(idx, train_state)
 
-    def logging_callback(
-        idx: int, train_info: dict, eval_info: dict, cfg
-    ):
-        train_info = {
-            f"train/{key}": float(value) for key, value in train_info.items()
-        }
+    def logging_callback(idx: int, train_info: dict, eval_info: dict, cfg):
+        train_info = {f"train/{key}": float(value) for key, value in train_info.items()}
         if idx % cfg.logging.eval_each == 0 or idx + 1 == cfg.num_train_steps:
             log.info(f"Step {idx}")
             log.info(train_info)
-            eval_info = {
-                f"eval/{key}": float(value) for key, value in eval_info.items()
-            }
+            eval_info = {f"eval/{key}": float(value) for key, value in eval_info.items()}
             log.info(eval_info)
             if cfg.logging.use_writer:
                 writer.log(eval_info, commit=False)

@@ -145,7 +145,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         env_obs: gfnx.TObs,
         current_policy_params,  # current_policy_params are network params
         train=True,
-    ) -> chex.Array:
+    ) -> tuple[chex.Array, dict]:
         # Recombine the network parameters with the static parts of the model
         current_model = eqx.combine(current_policy_params, policy_static)
         policy_outputs = current_model(env_obs)

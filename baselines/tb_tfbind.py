@@ -145,7 +145,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         env_obs: gfnx.TObs,
         current_policy_params,  # current_policy_params are network params
         train=True,
-    ) -> chex.Array:
+    ) -> tuple[chex.Array, dict]:
         # Recombine the network parameters with the static parts of the model
         current_model = eqx.combine(current_policy_params, policy_static)
         policy_outputs = current_model(env_obs)
@@ -407,7 +407,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         fwd_rng_key: chex.PRNGKey,
         env_obs: gfnx.TObs,
         policy_params,  # current_policy_params are network params
-    ) -> chex.Array:
+    ) -> tuple[chex.Array, dict]:
         # Recombine the network parameters with the static parts of the model
         current_model = eqx.combine(policy_params, policy_static)
         policy_outputs = current_model(env_obs)
@@ -417,7 +417,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         bwd_rng_key: chex.PRNGKey,
         env_obs: gfnx.TObs,
         policy_params,  # current_policy_params are network params
-    ) -> chex.Array:
+    ) -> tuple[chex.Array, dict]:
         # Recombine the network parameters with the static parts of the model
         current_model = eqx.combine(policy_params, policy_static)
         policy_outputs = current_model(env_obs)

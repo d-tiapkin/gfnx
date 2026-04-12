@@ -141,7 +141,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     # Define the policy function suitable for gfnx.utils.forward_rollout
     # Note: policy_params for this function are only the MLPPolicy's network
     # parameters
-    def fwd_policy_fn(rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params) -> chex.Array:
+    def fwd_policy_fn(
+        rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
+    ) -> tuple[chex.Array, dict]:
         # Recombine the network parameters with the static parts of the model
         current_model = eqx.combine(policy_params, policy_static)
         policy_outputs = current_model(env_obs)
@@ -392,7 +394,7 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     def fwd_policy_fn(
         rng_key: chex.PRNGKey, env_obs: gfnx.TObs, current_policy_params
-    ) -> chex.Array:
+    ) -> tuple[chex.Array, dict]:
         del rng_key
         # Recombine the network parameters with the static parts of the model
         current_model = eqx.combine(current_policy_params, policy_static)
@@ -401,7 +403,7 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     def bwd_policy_fn(
         rng_key: chex.PRNGKey, env_obs: gfnx.TObs, current_policy_params
-    ) -> chex.Array:
+    ) -> tuple[chex.Array, dict]:
         del rng_key
         current_model = eqx.combine(current_policy_params, policy_static)
         policy_outputs = current_model(env_obs)

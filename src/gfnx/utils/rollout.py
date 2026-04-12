@@ -194,9 +194,7 @@ def _generic_rollout(
         next_obs, next_env_state, done, step_info = step_fn(env_state, action, env_params)
         sampled_log_prob = policy_log_probs[action]
         info = {
-            "entropy": -masked_sum(
-                policy_probs * policy_log_probs, jnp.logical_not(invalid_mask)
-            ),
+            "entropy": -masked_sum(policy_probs * policy_log_probs, jnp.logical_not(invalid_mask)),
             "sampled_log_prob": sampled_log_prob,
             **step_info,
             **policy_info,

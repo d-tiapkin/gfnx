@@ -60,16 +60,12 @@ class TFBind8RewardModule(
         values = jnp.clip(values, min=self.min_reward)
         return TFBind8RewardParams(rewards=values)
 
-    def reward(
-        self, state: TFBind8EnvState, reward_params: TFBind8RewardParams
-    ) -> TReward:
+    def reward(self, state: TFBind8EnvState, reward_params: TFBind8RewardParams) -> TReward:
         powers_array = jnp.array([
             self.nchar ** (self.max_length - i - 1) for i in range(self.max_length)
         ])
         index = jnp.sum(state.tokens * powers_array)
         return reward_params.rewards[index]
 
-    def log_reward(
-        self, state: TFBind8EnvState, reward_params: TFBind8RewardParams
-    ) -> TLogReward:
+    def log_reward(self, state: TFBind8EnvState, reward_params: TFBind8RewardParams) -> TLogReward:
         return jnp.log(self.reward(state, reward_params))
