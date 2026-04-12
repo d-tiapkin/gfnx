@@ -281,7 +281,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         transitions.next_state,
         train_state.env_params,
     )
-    delta_score = train_state.reward_module.delta_score(transitions.next_state)
+    delta_score = jax.vmap(train_state.reward_module.delta_score)(
+        transitions.next_state
+    )
     # Compute rewards for terminal states (for logging purposes)
     log_rewards = jax.vmap(train_state.reward_module.log_reward, in_axes=(0, None))(
         final_states, train_state.reward_params
@@ -367,6 +369,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
                 "corr": OnPolicyCorrelationMetricsModule.ProcessArgs(
                     policy_params=policy_params,
                     env_params=env_params,
+                    reward_params=train_state.reward_params,
                 )
             }
         ),
@@ -498,6 +501,7 @@ def run_experiment(cfg: OmegaConf) -> None:
             fwd_policy_fn=fwd_policy_fn,
             bwd_policy_fn=bwd_policy_fn,
             env=env,
+            reward_module=reward_module,
         )
     })
     metrics_state = metrics_module.init(

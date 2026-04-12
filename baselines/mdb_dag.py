@@ -388,7 +388,10 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         bwd_logprobs = gfnx.utils.compute_action_log_probs(
             bwd_logits, bwd_actions, next_bwd_invalid_mask
         )
-        delta_score = train_state.reward_module.delta_score(
+        delta_score = jax.vmap(
+            train_state.reward_module.delta_score,
+            in_axes=(0, 0, 0, None, None)
+        )(
             transitions.state,
             transitions.action,
             transitions.next_state,

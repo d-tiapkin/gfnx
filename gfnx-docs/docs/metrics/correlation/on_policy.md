@@ -35,8 +35,10 @@ import jax
 import jax.numpy as jnp
 import gfnx
 
-env = gfnx.HypergridEnvironment(reward_module=gfnx.EasyHypergridRewardModule())
+env = gfnx.HypergridEnvironment()
+reward_module=gfnx.EasyHypergridRewardModule()
 params = env.init(jax.random.PRNGKey(0))
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
 policy_params = {
     "forward_num_actions": env.action_space.n,
@@ -67,13 +69,18 @@ metrics = gfnx.metrics.OnPolicyCorrelationMetricsModule(
     fwd_policy_fn=uniform_forward_policy,
     bwd_policy_fn=uniform_backward_policy,
     env=env,
+    reward_module=reward_module,
 )
 state = metrics.init(jax.random.PRNGKey(1), metrics.InitArgs(env_params=params))
 
 state = metrics.process(
     state,
     jax.random.PRNGKey(2),
-    metrics.ProcessArgs(policy_params=policy_params, env_params=params),
+    metrics.ProcessArgs(
+        policy_params=policy_params,
+        env_params=params,
+        reward_params=reward_params,
+    ),
 )
 scores = metrics.get(state)
 print(float(scores["pearson"]), float(scores["spearman"]))

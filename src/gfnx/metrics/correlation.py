@@ -304,6 +304,7 @@ class OnPolicyCorrelationMetricsModule(BaseCorrelationMetricsModule):
         fwd_policy_fn: TPolicyFn,
         bwd_policy_fn: TPolicyFn,
         env: TEnvironment,
+        reward_module: TRewardModule,
         domain_size: int | None = None,
         transform_fn: Callable[[TEnvState, jnp.ndarray], jnp.ndarray] = lambda x, y: y,
     ):
@@ -325,6 +326,7 @@ class OnPolicyCorrelationMetricsModule(BaseCorrelationMetricsModule):
         """
         super().__init__(
             env=env,
+            reward_module=reward_module,
             bwd_policy_fn=bwd_policy_fn,
             n_rounds=n_rounds,
             batch_size=batch_size,

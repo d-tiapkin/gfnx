@@ -59,7 +59,6 @@ __all__ = [
     "forward_trajectory_log_probs",
     "get_phylo_initialization_args",
     "get_true_ising_J",
-    "get_true_ising_J",
     "jensen_shannon_divergence",
     "kl_divergence",
     "make_replay_buffer",
