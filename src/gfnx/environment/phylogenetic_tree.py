@@ -254,6 +254,9 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
             state.sequences[state.to_root],
             jnp.zeros((self.num_nodes, self.sequence_length), dtype=jnp.uint8),
         )  # [num_nodes, sequence_length]
+        # Fitch features. One-hot encode each number in the sequence.
+        # E.g. for 5-bit encoding for each element in the sequence:
+        # [..., 0b00101, ...] <-> [..., [1, 0, 1, 0, 0], ...]
         fitch_features = (
             sequences[..., jnp.newaxis] & (1 << jnp.arange(self.bits_per_seq_elem))
         ) > 0  # [num_nodes, sequence_length, bits_per_seq_elem]
@@ -286,7 +289,7 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
         return jnp.logical_or(
             state.to_root[:-1] == -1,
             state.to_root[:-1] == jnp.arange(self.num_nodes - 1),
-        )
+        ) # last node is never a root
 
     @property
     def max_steps_in_episode(self) -> int:

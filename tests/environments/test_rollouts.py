@@ -129,8 +129,8 @@ class TestRollouts:
         self, environment_class, reward_module_class, env_kwargs, reward_kwargs
     ) -> dict[str, Any]:
         """Setup environment and its components."""
-        reward_module : BaseRewardModule = reward_module_class(**reward_kwargs)
-        env : BaseEnvironment = environment_class(**env_kwargs)
+        reward_module: BaseRewardModule = reward_module_class(**reward_kwargs)
+        env: BaseEnvironment = environment_class(**env_kwargs)
         rng_key = jax.random.PRNGKey(0)
         num_envs = 1000
         env_params = env.init(rng_key)
