@@ -77,7 +77,7 @@ where F̃_θ(s) = exp(E(s)) · F_θ(s). Used for phylogenetic trees.
 
 ### `BaseEnvState`
 Chex frozen dataclass. Every concrete state inherits from this and adds domain fields.
-Always has: `is_terminal [B]`, `is_initial [B]`, `is_pad [B]`.
+Always has: `is_terminal []`, `is_initial []`, `is_pad []`.
 
 ### `BaseEnvParams`
 Chex frozen dataclass. Every concrete `EnvParams` inherits from this. Contains only dynamics parameters — **reward params are NOT stored here** (see reward decoupling below).
