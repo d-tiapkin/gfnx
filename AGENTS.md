@@ -100,8 +100,6 @@ Key methods (all single-instance):
 | `init(rng_key)` | `-> TEnvParams` | Inits env dynamics params only (no reward) |
 | `step(state, action, env_params)` | `-> (obs, next_state, done, info)` | Single step; no reward returned |
 | `backward_step(state, bwd_action, env_params)` | `-> (obs, state, done, info)` | Single backward step |
-| `_transition(state, action, env_params)` | `-> (next_state, done, info)` | **Implement this** in subclasses (unbatched) |
-| `_backward_transition(state, bwd_action, env_params)` | `-> (next_state, done, info)` | **Implement this** in subclasses (unbatched) |
 | `get_obs(state, env_params)` | `-> chex.ArrayTree` | Single state → single obs |
 | `get_invalid_mask(state, env_params)` | `-> Bool[n_actions]` | Single state → mask |
 | `get_invalid_backward_mask(state, env_params)` | `-> Bool[n_bwd_actions]` | Single state → mask |
