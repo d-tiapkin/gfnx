@@ -30,7 +30,7 @@ from gfnx.metrics import (
     ApproxDistributionMetricsModule,
     MultiMetricsModule,
     MultiMetricsState,
-    SWMeanRewardSWMetricsModule,
+    SWExpectedRewardMetricsModule,
 )
 
 log = logging.getLogger(__name__)
@@ -257,7 +257,6 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     new_model = eqx.apply_updates(train_state.model, updates["model_params"])
     new_logZ = eqx.apply_updates(train_state.logZ, updates["logZ"])
     # Peform all the requied logging
-    rewards = train_state.reward_module.reward(final_states, train_state.reward_params)
     rng_key, eval_rng_key = jax.random.split(rng_key)
 
     metrics_state, eval_info = train_state.metrics_module.step(
@@ -267,15 +266,15 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         update_args=train_state.metrics_module.UpdateArgs(
             metrics_args={
                 "distribution": ApproxDistributionMetricsModule.UpdateArgs(states=final_states),
-                "rd": SWMeanRewardSWMetricsModule.UpdateArgs(
-                    rewards=rewards,
+                "rd": SWExpectedRewardMetricsModule.UpdateArgs(
+                    rewards=jnp.exp(log_rewards),
                 ),
             }
         ),
         process_args=train_state.metrics_module.ProcessArgs(
             metrics_args={
                 "distribution": ApproxDistributionMetricsModule.ProcessArgs(env_params=env_params),
-                "rd": SWMeanRewardSWMetricsModule.ProcessArgs(),
+                "rd": SWExpectedRewardMetricsModule.ProcessArgs(),
             }
         ),
         eval_each=train_state.config.logging.eval_each,
@@ -393,9 +392,11 @@ def run_experiment(cfg: OmegaConf) -> None:
                 reward_module=reward_module,
                 buffer_size=cfg.logging.metric_buffer_size,
             ),
-            "rd": SWMeanRewardSWMetricsModule(
+            "rd": SWExpectedRewardMetricsModule(
                 env=env,
                 env_params=env_params,
+                reward_module=reward_module,
+                reward_params=reward_params,
                 buffer_size=cfg.logging.metric_buffer_size,
             ),
         }
@@ -408,7 +409,7 @@ def run_experiment(cfg: OmegaConf) -> None:
                 "distribution": ApproxDistributionMetricsModule.InitArgs(
                     env_params=env_params, reward_params=reward_params
                 ),
-                "rd": SWMeanRewardSWMetricsModule.InitArgs(),
+                "rd": SWExpectedRewardMetricsModule.InitArgs(),
             }
         ),
     )

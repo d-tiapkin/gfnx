@@ -222,7 +222,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         process_args=train_state.metrics_module.ProcessArgs(
             metrics_args={
                 "topk": TopKMetricsModule.ProcessArgs(
-                    policy_params=policy_params, env_params=env_params
+                    policy_params=policy_params,
+                    reward_params=train_state.reward_params,
+                    env_params=env_params,
                 )
             }
         ),
@@ -338,8 +340,9 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     metrics_module = MultiMetricsModule({
         "topk": TopKMetricsModule(
-            fwd_policy_fn=fwd_policy_fn,
             env=env,
+            reward_module=reward_module,
+            fwd_policy_fn=fwd_policy_fn,
             num_traj=cfg.metrics.num_traj,
             batch_size=cfg.metrics.batch_size,  # Ignored for a moment
             top_k=[10, 50, 100],

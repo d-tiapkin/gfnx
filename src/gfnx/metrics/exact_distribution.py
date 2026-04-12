@@ -285,8 +285,8 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
             invalid_mask_batch = self.env.get_invalid_mask_batch(states_batch, env_params)
 
             fwd_policy_logits, _ = jax.vmap(
-                lambda obs: self.fwd_policy_fn(subkey, obs, policy_params)
-            )(obs_batch)
+                lambda key, obs: self.fwd_policy_fn(key, obs, policy_params)
+            )(jax.random.split(subkey, obs_batch.shape[0]), obs_batch)
             fwd_policy_probs = jax.nn.softmax(
                 fwd_policy_logits, axis=-1, where=jnp.logical_not(invalid_mask_batch)
             )

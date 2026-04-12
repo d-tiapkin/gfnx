@@ -18,9 +18,9 @@ can provide ground-truth reward expectation (`env.is_expected_reward_tractable =
 
 ## Modules
 
-- `MeanRewardMetricsModule`: maintains running sums of collected rewards and
+- `ExpectedRewardMetricsModule`: maintains running sums of collected rewards and
   reports the global mean, absolute delta, and relative delta.
-- `SWMeanRewardSWMetricsModule`: keeps a sliding window of the most recent
+- `SWExpectedRewardMetricsModule`: keeps a sliding window of the most recent
   rewards using a [`flashbax`](https://github.com/instadeepai/flashbax) buffer, offering the same statistics 
   but focused on recent performance.
 
@@ -48,10 +48,14 @@ Both modules return a dictionary with keys `mean_reward`, `reward_delta`, and
 import jax
 import gfnx
 
-env = gfnx.HypergridEnvironment(reward_module=gfnx.EasyHypergridRewardModule())
+env = gfnx.HypergridEnvironment()
+reward_module=gfnx.EasyHypergridRewardModule()
 params = env.init(jax.random.PRNGKey(0))
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
-mean_metric = gfnx.metrics.MeanRewardMetricsModule(env=env, env_params=params)
+mean_metric = gfnx.metrics.ExpectedRewardMetricsModule(
+  env=env, env_params=params, reward_module=reward_module, reward_params=reward_params
+)
 state = mean_metric.init(jax.random.PRNGKey(1), mean_metric.InitArgs())
 
 # During training: accumulate rewards from rollouts (log or linear, your choice).
