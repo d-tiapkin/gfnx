@@ -100,7 +100,7 @@ class ExpectedRewardMetricsModule(BaseMetricsModule):
                 linear space for mean computation.
         """
 
-        log_rewards: chex.Array
+        rewards: chex.Array
 
     def update(
         self, metrics_state: ExpectedRewardMetricsState, rng_key: chex.PRNGKey, args: UpdateArgs
@@ -120,8 +120,8 @@ class ExpectedRewardMetricsModule(BaseMetricsModule):
                 into the running statistics
         """
         return ExpectedRewardMetricsState(
-            sum_reward=metrics_state.sum_reward + jnp.sum(args.log_rewards),
-            num=metrics_state.num + args.log_rewards.shape[0],
+            sum_reward=metrics_state.sum_reward + jnp.sum(args.rewards),
+            num=metrics_state.num + args.rewards.shape[0],
         )
 
     ProcessArgs = EmptyProcessArgs
@@ -296,10 +296,10 @@ class SWExpectedRewardMetricsModule(BaseMetricsModule):
 
     def process(
         self,
-        metrics_state: ExpectedRewardMetricsState,
+        metrics_state: SWExpectedRewardMetricsState,
         rng_key: chex.PRNGKey,
         args: ProcessArgs | None = None,
-    ) -> ExpectedRewardMetricsState:
+    ) -> SWExpectedRewardMetricsState:
         """Process the metric state for final computation (no-op for sliding window metrics).
 
         This method performs any final processing needed before metric computation.
@@ -312,7 +312,7 @@ class SWExpectedRewardMetricsModule(BaseMetricsModule):
             args: EmptyProcessArgs (no additional processing parameters needed)
 
         Returns:
-            ExpectedRewardMetricsState: Unchanged metric state ready for get() call
+            SWExpectedRewardMetricsState: Unchanged metric state ready for get() call
         """
         return metrics_state
 
