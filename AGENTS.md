@@ -83,7 +83,7 @@ Always has: `is_terminal [B]`, `is_initial [B]`, `is_pad [B]`.
 Chex frozen dataclass. Every concrete `EnvParams` inherits from this. Contains only dynamics parameters — **reward params are NOT stored here** (see reward decoupling below).
 
 ### `BaseEnvironment[TEnvState, TEnvParams]`
-Abstract base. All environments operate on **single states** (no batch dimension). **Stateless**: all mutable data lives in `EnvState`. **Does not hold a reward module** — rewards are fully decoupled. `BaseVecEnvironment` is an alias for backward compatibility.
+Abstract base. All environments operate on **single states** (no batch dimension). **Stateless**: all mutable data lives in `EnvState`. **Does not hold a reward module** — rewards are fully decoupled. `BaseVecEnvironment` is removed.
 
 Use `jax.vmap` externally to run multiple environments in parallel:
 ```python
@@ -96,7 +96,7 @@ traj_data, final_states, info = jax.vmap(
 Key methods (all single-instance):
 | Method | Signature | Notes |
 |--------|-----------|-------|
-| `get_init_state()` | `-> TEnvState` | Returns a single initial state (no batch dim) |
+| `reset()` | `-> TEnvState` | Returns a single initial state (no batch dim) |
 | `init(rng_key)` | `-> TEnvParams` | Inits env dynamics params only (no reward) |
 | `step(state, action, env_params)` | `-> (obs, next_state, done, info)` | Single step; no reward returned |
 | `backward_step(state, bwd_action, env_params)` | `-> (obs, state, done, info)` | Single backward step |
@@ -118,7 +118,7 @@ Key methods (all single-instance):
 
 Enumerable environments additionally implement:
 `get_all_states`, `state_to_index`, `get_true_distribution`, `get_empirical_distribution`,
-`get_mean_reward`, `get_normalizing_constant`, `get_ground_truth_sampling`.
+`get_expected_reward`, `get_normalizing_constant`, `get_ground_truth_sampling`.
 These methods accept `reward_module, reward_params` as explicit arguments.
 
 ### `BaseRewardModule[TEnvState, TRewardParams]`
@@ -138,7 +138,7 @@ Batched usage: `jax.vmap(reward_module.log_reward, in_axes=(0, None))(states, re
 ```python
 env = HypergridEnvironment(dim=4, side=20)  # no reward_module arg
 env_params = env.init(rng_key)  # only dynamics params
-reward_params = reward_module.init(reward_key, env.get_init_state())  # single dummy state
+reward_params = reward_module.init(reward_key, env.reset())  # single dummy state
 ```
 
 **Backward action abstraction** (paper §2, vs torchgfn): torchgfn defines a backward move as an inverse to every forward transition (e.g., "remove symbol at specific position"). gfnx abstracts to structural choices only (e.g., "remove any character at a particular position"). This makes it easy to reason about state reversibility and implement symmetric training objectives.
@@ -279,9 +279,6 @@ backward_trajectory_log_probs(env, bwd_traj_data, env_params) -> (log_pf, log_pb
 ### Masking utilities (`src/gfnx/utils/masking.py`)
 
 ```python
-mask_logits(logits, invalid_mask) -> logits
-# Sets invalid action logits to -inf.
-
 compute_action_log_probs(logits, actions, invalid_mask, pad_mask=None) -> Array
 # Full pipeline: mask_logits → log_softmax → take_along_axis → optional zero-out pads.
 # logits: [..., n_actions], actions: [...], invalid_mask: [..., n_actions]
@@ -290,15 +287,34 @@ compute_action_log_probs(logits, actions, invalid_mask, pad_mask=None) -> Array
 
 Replaces the 4-line boilerplate in every baseline's loss function:
 ```python
-# Before (4 lines):
-masked_logits = gfnx.utils.mask_logits(logits, mask)
-all_log_probs = jax.nn.log_softmax(masked_logits, axis=-1)
+# Before (3 lines):
+all_log_probs = jax.nn.log_softmax(masked_logits, where=jnp.logical_not(maske), axis=-1)
 selected = jnp.take_along_axis(all_log_probs, jnp.expand_dims(actions, -1), axis=-1).squeeze(-1)
 selected = jnp.where(pad, 0.0, selected)
 
 # After (1 line):
 selected = gfnx.utils.compute_action_log_probs(logits, actions, mask, pad_mask)
 ```
+
+Also, additional useful utility functions
+
+```python
+masked_sum(x, mask, axis=-1) -> Array
+masked_mean(x, mask, axis=-1) -> Array
+```
+
+Used as
+```python
+# Before
+msum = jnp.sum(jnp.where(mask, x, 0.0), axis=-1)
+num_valid = jnp.sum(mask, axis=-1, keep_dims=True)
+mmean = msum / jnp.maximum(num_valid, 1.0)
+
+# After
+msum = masked_sum(x, mask, axis=-1)
+mmean = masked_mean(x, mask, axis=-1)
+```
+Do not reduce boilerplate but improve readability.
 
 ### Training loop utility (`src/gfnx/utils/training.py`)
 
@@ -312,7 +328,7 @@ train_state = gfnx.utils.run_training_loop(
     train_step, train_state, cfg.num_train_steps, cfg.logging["tqdm_print_rate"]
 )
 ```
-Not applicable to multiseed scripts (`*_multiseed.py`), which use `jax.vmap(fori_loop)` directly.
+Not applicable to multiseed scripts (`*_multiseed.py`), which use `jax.vmap(jax.lax.scan)` directly.
 
 **Post-rollout pattern** (used in all training scripts):
 ```python
@@ -541,16 +557,16 @@ Key insight: gfnx runs the full training pipeline (including environment) end-to
 
 ## Common Gotchas
 
-- **`_transition` is unbatched** — implement it without vmap; it is the abstract method subclasses override. `step()` calls it directly (no internal vmap — the batch vmap is applied externally at the rollout site).
+- **`step` is unbatched** — implement it without vmap; it is the abstract method subclasses override.
 - **`env.max_steps_in_episode`** must be exact — `forward_rollout` allocates `T+1` steps. One extra step is always padding.
 - **`TrajectoryData` is `[T+1, ...]` per single rollout** — after `jax.vmap(forward_rollout)(rng_keys)`, shape is `[B, T+1, ...]`. The last time step is always padding (`pad=True`).
 - **`split_traj_to_transitions` is single-trajectory** — apply `jax.vmap(split_traj_to_transitions)(traj_data)` to get `[B, T, ...]`, then flatten to `[B*T, ...]` with `jax.tree.map(lambda x: x.reshape((-1,) + x.shape[2:]), ...)`.
 - **`jax.debug.callback` does not work inside `jax.vmap`** — do not use it in training loops intended to be vmapped over seeds.
 - **Equinox `eqx.partition`** splits a pytree into `(arrays, static)`. The static part must be shared / hashable. The dynamic arrays part is what gets vmapped/JIT'd.
-- **`jax.lax.fori_loop` IS vmappable** — use it as the loop primitive in multi-seed training.
+- **`jax.lax.fori_loop` and `lax.jax.scan` ARE vmappable** — use it as the loop primitive in multi-seed training.
 - **Reward is computed once per rollout**, not per step — `jax.vmap(reward_module.log_reward, in_axes=(0, None))(final_states, reward_params)` is called after `forward_rollout` returns, on the batch of terminal states.
 - **`reward_params` must NOT be stored as a class field on metrics modules** — they can be large (e.g. full TFBind8 table) or trainable (Ising J matrix). Pass via `ProcessArgs` at each evaluation call instead.
 - **Hypergrid reward modules require `side` at construction** — `EasyHypergridRewardModule(side=cfg.environment.side)`. The reward module needs to know the grid size to compute coordinates, but it is no longer passed `env_params` at call time.
-- **DB terminal loss weighting** — for transition-level losses on AMP, terminal states are penalized more heavily (λ=25 penalty factor). This improves stability.
+- **DB terminal loss weighting** — for transition-level losses on AMP, terminal states are penalized more heavily (λ=25 penalty factor). This improves reward propagation.
 - **Phylo tree rewards use a stability constant C** — `R(T) = exp((C − M(T)) / α)`. Without C the exponent can overflow. Dataset-specific C values: {5800, 8000, 8800, 3500, 2300, 2300, 12500, 2800} for DS1–DS8.
 - **ε-uniform exploration** is used across all environments to improve coverage. Schedules vary: constant ε=1e-3 (bitseq/AMP), linearly annealed 1.0→0.0 (TFBind8/QM9/phylo), linearly annealed 1.0→0.1 (DAG).
