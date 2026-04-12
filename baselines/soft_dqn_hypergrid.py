@@ -102,7 +102,7 @@ class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
     config: OmegaConf
     env: gfnx.HypergridEnvironment
-    env_params: chex.Array
+    env_params: gfnx.HypergridEnvParams
     model: MLPPolicy
     target_model: MLPPolicy
     optimizer: optax.GradientTransformation

@@ -105,7 +105,7 @@ class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
     config: OmegaConf
     env: gfnx.AMPEnvironment
-    env_params: chex.Array
+    env_params: gfnx.AMPEnvParams
     reward_module: gfnx.EqxProxyAMPRewardModule
     reward_params: gfnx.AMPRewardParams
     model: TransformerPolicy

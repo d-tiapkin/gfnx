@@ -112,7 +112,7 @@ class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
     config: OmegaConf
     env: gfnx.BitseqEnvironment
-    env_params: chex.Array
+    env_params: gfnx.BitseqEnvParams
     reward_module: gfnx.BitseqRewardModule
     reward_params: gfnx.BitseqRewardParams
     model: TransformerPolicy

@@ -2,7 +2,7 @@
 
 The reward-delta metrics track how the empirical mean reward compares to the
 true mean reward of the environment. They are useful whenever the environment
-can provide ground-truth reward expectation (`env.is_mean_reward_tractable = True`).
+can provide ground-truth reward expectation (`env.is_expected_reward_tractable = True`).
 
 ## Intuition
 
@@ -42,7 +42,7 @@ Both modules return a dictionary with keys `mean_reward`, `reward_delta`, and
 
 ## Quick start
 
-> **Environment requirement:** the environment must expose a tractable ground-truth mean reward (`env.is_mean_reward_tractable = True`) so deltas are meaningful.
+> **Environment requirement:** the environment must expose a tractable ground-truth mean reward (`env.is_expected_reward_tractable = True`) so deltas are meaningful.
 
 ```python
 import jax

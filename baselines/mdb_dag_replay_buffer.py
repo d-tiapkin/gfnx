@@ -287,7 +287,7 @@ class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
     config: OmegaConf
     env: gfnx.DAGEnvironment
-    env_params: chex.Array
+    env_params: gfnx.DAGEnvParams
     reward_module: gfnx.DAGRewardModule
     reward_params: gfnx.DAGRewardParams
     replay_buffer: ReplayBuffer[TransitionData]

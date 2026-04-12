@@ -205,7 +205,7 @@ class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
     config: OmegaConf
     env: gfnx.PhyloTreeEnvironment
-    env_params: chex.Array
+    env_params: gfnx.PhyloTreeEnvParams
     model: TransformerPolicy
     target_model: TransformerPolicy  # New: target network copy used for bootstrapping
     optimizer: optax.GradientTransformation

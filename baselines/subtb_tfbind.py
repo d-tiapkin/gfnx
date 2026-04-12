@@ -110,7 +110,7 @@ class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
     config: OmegaConf
     env: gfnx.TFBind8Environment
-    env_params: chex.Array
+    env_params: gfnx.TFBind8EnvParams
     model: MLPPolicy
     optimizer: optax.GradientTransformation
     opt_state: optax.OptState

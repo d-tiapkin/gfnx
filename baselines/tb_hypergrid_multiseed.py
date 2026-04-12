@@ -90,7 +90,7 @@ class MLPPolicy(eqx.Module):
 @chex.dataclass
 class TrainStateParams:
     rng_key: chex.PRNGKey
-    model_params: chex.Array  # eqx.filter(model, eqx.is_array)
+    model_params: chex.ArrayTree  # eqx.filter(model, eqx.is_array)
     logZ: chex.Array
     opt_state: optax.OptState
     reward_params: gfnx.HypergridRewardParams

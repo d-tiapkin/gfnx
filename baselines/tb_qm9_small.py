@@ -112,7 +112,7 @@ class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
     config: OmegaConf
     env: gfnx.QM9SmallEnvironment
-    env_params: chex.Array
+    env_params: gfnx.QM9SmallEnvParams
     reward_module: gfnx.QM9SmallRewardModule
     reward_params: gfnx.QM9SmallRewardParams
     model: MLPPolicy

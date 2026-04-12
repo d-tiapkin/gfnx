@@ -121,7 +121,7 @@ class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
     config: OmegaConf
     env: gfnx.BitseqEnvironment
-    env_params: chex.Array
+    env_params: gfnx.BitseqEnvParams
     model: TransformerPolicy
     optimizer: optax.GradientTransformation
     opt_state: optax.OptState

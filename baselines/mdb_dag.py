@@ -284,7 +284,7 @@ class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
     config: OmegaConf
     env: gfnx.DAGEnvironment
-    env_params: chex.Array
+    env_params: gfnx.DAGEnvParams
     exploration_schedule: optax.Schedule
     model: GNNPolicy
     target_model: GNNPolicy
