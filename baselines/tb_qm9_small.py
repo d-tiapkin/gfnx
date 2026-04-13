@@ -155,8 +155,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
 
         # Apply epsilon exploration to logits
         if train:
-            _rng_key, exploration_key = jax.random.split(fwd_rng_key)
-            do_explore = jax.random.bernoulli(exploration_key, cur_eps)
+            do_explore = jax.random.bernoulli(fwd_rng_key, cur_eps)
             fwd_logits = jnp.where(do_explore, 0, fwd_logits)
 
         return fwd_logits, policy_outputs
