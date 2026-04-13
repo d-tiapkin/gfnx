@@ -224,11 +224,11 @@ Joint learning of J and GFlowNet policy (EB-GFN algorithm). J initialized as tor
 | `IsingRewardModule` | `ising.py` | Quadratic form x^T J x; J stored in `reward_params` as `IsingRewardParams(J=...)` |
 | `EqxProxyAMPRewardModule` | `amp.py` | Pre-trained Equinox Transformer; model weights in `reward_params` |
 | `EqxProxyGFPRewardModule` | `gfp.py` | Same pattern |
-| `BitseqRewardModule` | `bitseq.py` | Mode-set Hamming distance; `reward_params["mode_set"]` holds the modes |
-| `TFBind8RewardModule` | `tfbind.py` | Lookup table in `reward_params["rewards"]` |
-| `QM9SmallRewardModule` | `qm9_small.py` | Lookup table in `reward_params["rewards"]` |
+| `BitseqRewardModule` | `bitseq.py` | Mode-set Hamming distance; `BitseqRewardParams(mode_set=...)` holds the modes |
+| `TFBind8RewardModule` | `tfbind.py` | Lookup table in `TFBind8RewardParams(rewards=...)` |
+| `QM9SmallRewardModule` | `qm9_small.py` | Lookup table in `QM9SmallRewardParams(rewards=...)` |
 | `DAGRewardModule` | `dag.py` | Composes `BaseDAGPrior` + `BaseDAGLikelihood`; has `delta_score` for efficient incremental scoring |
-| `PhyloTreeRewardModule` | `phylogenetic_tree.py` | Parsimony-based; stores `num_nodes` as Python attr; `reward_params = {}` |
+| `PhyloTreeRewardModule` | `phylogenetic_tree.py` | Parsimony-based; stores `num_nodes` as Python attr; `PhyloTreeRewardParams()` (empty frozen dataclass) |
 
 **DAG special case**: `BaseDAGLikelihood` and `BaseDAGPrior` have a `delta_score` method not in `BaseRewardModule`:
 ```python
@@ -236,7 +236,7 @@ delta_score(state, action, next_state, env_params, reward_params)
 ```
 `env_params` supplies geometry (e.g. `num_variables`); `reward_params` supplies data (likelihood/prior params). Used in `mdb_dag.py`.
 
-**Ising special case**: The J matrix (stored in `reward_params`) is a **trainable** reward parameter jointly updated with the GFlowNet policy in `tb_ising.py`. After each EBM update step: `new_reward_params = IsingRewardParams(J=new_ebm.J)` replaces the old reward_params in `TrainState`.
+**Ising special case**: The J matrix (stored in `reward_params`) is a **trainable** reward parameter jointly updated with the GFlowNet policy in `tb_ising.py`. After each EBM update step: `new_reward_params = train_state.reward_params.replace(J=new_ebm.J)` replaces the old reward_params in `TrainState`.
 
 **DAG acyclicity enforcement**: maintained online via adjacency matrix + transitive closure of G^T. When adding edge (u→v): set adjacency entry + update transitive closure via outer product of column v and row u (binary OR). O(d²) per step, no expensive cycle checks.
 
@@ -278,20 +278,20 @@ backward_trajectory_log_probs(env, bwd_traj_data, env_params) -> (log_pf, log_pb
 
 ```python
 compute_action_log_probs(logits, actions, invalid_mask, pad_mask=None) -> Array
-# Full pipeline: mask_logits → log_softmax → take_along_axis → optional zero-out pads.
+# Full pipeline: log_softmax(where=~invalid_mask) → take_along_axis → optional zero-out pads.
 # logits: [..., n_actions], actions: [...], invalid_mask: [..., n_actions]
 # Returns: [...] log probabilities of selected actions; padded steps are set to 0.0.
 ```
 
-Replaces the 4-line boilerplate in every baseline's loss function:
+Replaces the 3-line boilerplate in every baseline's loss function:
 ```python
 # Before (3 lines):
-all_log_probs = jax.nn.log_softmax(masked_logits, where=jnp.logical_not(maske), axis=-1)
+all_log_probs = jax.nn.log_softmax(logits, where=jnp.logical_not(invalid_mask), axis=-1)
 selected = jnp.take_along_axis(all_log_probs, jnp.expand_dims(actions, -1), axis=-1).squeeze(-1)
 selected = jnp.where(pad, 0.0, selected)
 
 # After (1 line):
-selected = gfnx.utils.compute_action_log_probs(logits, actions, mask, pad_mask)
+selected = gfnx.utils.compute_action_log_probs(logits, actions, invalid_mask, pad_mask)
 ```
 
 Also, additional useful utility functions
@@ -391,8 +391,8 @@ loss = squared_error(logZ + sum_log_pf, target).mean()
 
 **DB loss** — `log_rewards` is `[B]`; must be broadcast to `[B*T]` (one per transition):
 ```python
-T_steps = transitions.done.shape[0] // num_envs
-traj_rewards_flat = jnp.repeat(log_rewards, T_steps)  # [B*T]
+t_steps = transitions.done.shape[0] // num_envs
+traj_rewards_flat = jnp.repeat(log_rewards, t_steps)  # [B*T]
 target = jnp.where(
     transitions.done, bwd_logprobs + traj_rewards_flat, bwd_logprobs + next_log_flow
 )
@@ -434,15 +434,20 @@ seeds = jnp.arange(cfg.num_seeds)
 all_init_params = jax.vmap(make_init_params)(seeds)  # batched initialization
 
 
-# Simplified, actual version is more complex
+# Two-level scan: outer over num_evals epochs (evaluate-then-train), inner over training steps.
 @jax.jit
-def run_all_seeds(all_init_params):
-    return jax.vmap(lambda init: jax.lax.fori_loop(0, cfg.num_train_steps, train_step, init))(
-        all_init_params
-    )
+def run_all_seeds(all_params, all_metrics):
+    def run_one_seed(params, metrics):
+        final_carry, metric_history = jax.lax.scan(
+            epoch_fn, (params, metrics), jnp.arange(cfg.num_evals)
+        )
+        return metric_history  # [num_evals, ...]
+
+    return jax.vmap(run_one_seed)(all_params, all_metrics)
 
 
-all_final_params = jax.block_until_ready(run_all_seeds(all_init_params))
+# all_histories: dict[str, Array[num_seeds, num_evals+1]]
+all_histories = jax.block_until_ready(run_all_seeds(all_init_params, all_init_metrics))
 # Log aggregate stats (mean ± std) over seeds after block_until_ready
 ```
 
@@ -474,7 +479,8 @@ Key constraints for vmap-compatible training loops:
 | `jax.lax.scan` | `rollout.py:forward_rollout` | Unroll episode steps without Python loop |
 | `jax.lax.cond` | `environment/*.py`, `metrics/base.py:step` | Conditional branching under JIT; used in both env transitions and metric eval gating |
 | `jax.lax.fori_loop` | `utils/training.py:run_training_loop` | Main training loop — **vmappable**, unlike Python for loops |
-| `jax.vmap(fori_loop(...))` | `*_multiseed.py` | Vmap full training over seeds |
+| `jax.lax.scan` | `rollout.py`, `*_multiseed.py` | Episode rollout + multi-seed outer evaluation loop |
+| `jax.vmap(jax.lax.scan(...))` | `*_multiseed.py` | Vmap full training (as scan over epochs) over seeds |
 | `eqx.filter_jit` / `eqx.partition` | `baselines/*:train_step` | JIT with Equinox modules |
 | `eqx.filter_value_and_grad` | `baselines/*:loss_fn` | Grad through Equinox models |
 | `jax.debug.callback` | `baselines/*:logging_callback` | Side-effectful logging inside JIT; **NOT vmap-compatible** |
@@ -492,7 +498,7 @@ All metrics follow a functional `init -> update -> process -> get` pattern, with
 | `ELBOMetricsModule` | ELBO = E[log R(x) − log P_θ(x)] | Forward rollouts |
 | `EUBOMetricsModule` | EUBO = E[log P_B − log P_F + log R] | Backward rollouts from test set |
 | `CorrelationMetricsModule` | Pearson/Spearman of P̂_θ(x) vs R(x) | Monte Carlo estimate: P̂_θ(x) = (1/N) Σ P_F(τ)/P_B(τ|x), τ~P_B(·|x) |
-| `RewardDeltaMetricsModule` | Tracks mean reward shift | Running statistics |
+| `ExpectedRewardMetricsModule` / `SWExpectedRewardMetricsModule` | Tracks empirical mean reward vs. ground-truth `env.get_expected_reward` | Running sum or sliding window |
 | `MultiMetricsModule` | Composes any dict of the above | — |
 
 **`step()` convenience method** (defined on `BaseMetricsModule`, available to all subclasses including `MultiMetricsModule`):
@@ -562,7 +568,7 @@ Key insight: gfnx runs the full training pipeline (including environment) end-to
 - **`split_traj_to_transitions` is single-trajectory** — apply `jax.vmap(split_traj_to_transitions)(traj_data)` to get `[B, T, ...]`, then flatten to `[B*T, ...]` with `jax.tree.map(lambda x: x.reshape((-1,) + x.shape[2:]), ...)`.
 - **`jax.debug.callback` does not work inside `jax.vmap`** — do not use it in training loops intended to be vmapped over seeds.
 - **Equinox `eqx.partition`** splits a pytree into `(arrays, static)`. The static part must be shared / hashable. The dynamic arrays part is what gets vmapped/JIT'd.
-- **`jax.lax.fori_loop` and `lax.jax.scan` ARE vmappable** — use it as the loop primitive in multi-seed training.
+- **`jax.lax.fori_loop` and `jax.lax.scan` ARE vmappable** — use either as the loop primitive in multi-seed training. Single-seed baselines use `fori_loop` (via `run_training_loop`); multi-seed scripts use `scan` for structured eval/train epochs.
 - **Reward is computed once per rollout**, not per step — `jax.vmap(reward_module.log_reward, in_axes=(0, None))(final_states, reward_params)` is called after `forward_rollout` returns, on the batch of terminal states.
 - **`reward_params` must NOT be stored as a class field on metrics modules** — they can be large (e.g. full TFBind8 table) or trainable (Ising J matrix). Pass via `ProcessArgs` at each evaluation call instead.
 - **Hypergrid reward modules require `side` at construction** — `EasyHypergridRewardModule(side=cfg.environment.side)`. The reward module needs to know the grid size to compute coordinates, but it is no longer passed `env_params` at call time.
