@@ -260,7 +260,7 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
         remainder = num_states % self.batch_size
         if remainder != 0:
             pad_width = self.batch_size - remainder
-            padded_sorted_states = jax.tree_map(
+            padded_sorted_states = jax.tree.map(
                 lambda x: jnp.pad(
                     x, ((0, pad_width),) + ((0, 0),) * (x.ndim - 1), mode="constant"
                 ),

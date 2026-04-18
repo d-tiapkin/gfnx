@@ -305,22 +305,22 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             log.info(f"Step {idx}")
             log.info(train_info)
             # Get the evaluation metrics
-            eval_info = {
-                f"eval/{key}": float(value)
-                for key, value in eval_info.items()
-                if "2d_marginal_distribution" not in key
-            }
+            eval_info = {f"eval/{key}": value for key, value in eval_info.items()}
+
             log.info({
-                key: value
+                key: float(value)
                 for key, value in eval_info.items()
                 if "2d_marginal_distribution" not in key
             })
             if cfg.logging.use_writer:
-                marginal_dist = eval_info["eval/2d_marginal_distribution"]
+                marginal_key = next(
+                    k for k in eval_info if "2d_marginal_distribution" in k
+                )
+                marginal_dist = eval_info[marginal_key]
                 marginal_dist = (marginal_dist - marginal_dist.min()) / (
                     marginal_dist.max() - marginal_dist.min()
                 )
-                eval_info["eval/2d_marginal_distribution"] = writer.Image(
+                eval_info[marginal_key] = writer.Image(
                     np.array(
                         255.0 * marginal_dist,
                         dtype=np.int32,

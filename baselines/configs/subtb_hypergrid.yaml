@@ -9,7 +9,7 @@ agent:
   learning_rate: 1e-3
   eps_exploration: 0.00
   train_backward: true
-  lmbd: 1.0
+  lmbd: 0.9
   start_eps: 0.0
   end_eps: 0.0
   exploration_steps: 1_000

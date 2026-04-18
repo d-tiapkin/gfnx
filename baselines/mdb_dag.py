@@ -597,7 +597,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     ) -> tuple[chex.Array, dict[str, chex.Array]]:
         del rng_key
         policy = eqx.combine(policy_params, policy_static)
-        policy_outputs = policy(env_obs)
+        policy_outputs = jax.tree.map(lambda x: x.squeeze(0), policy(env_obs[None]))
         return policy_outputs["forward_logits"], policy_outputs
 
     def bwd_policy_fn(
@@ -605,7 +605,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     ) -> tuple[chex.Array, dict[str, chex.Array]]:
         del rng_key
         policy = eqx.combine(policy_params, policy_static)
-        policy_outputs = policy(env_obs)
+        policy_outputs = jax.tree.map(lambda x: x.squeeze(0), policy(env_obs[None]))
         return policy_outputs["backward_logits"], policy_outputs
 
     def edge_score_transform_fn(env_state: gfnx.DAGEnvState, log_score: chex.Array) -> chex.Array:
@@ -649,12 +649,14 @@ def run_experiment(cfg: OmegaConf) -> None:
         ),
         "reward_corr": TestCorrelationMetricsModule(
             env=env,
+            reward_module=reward_module,
             bwd_policy_fn=bwd_policy_fn,
             n_rounds=cfg.metrics.n_rounds,
             batch_size=cfg.metrics.batch_size,
         ),
         "edge_corr": TestCorrelationMetricsModule(
             env=env,
+            reward_module=reward_module,
             bwd_policy_fn=bwd_policy_fn,
             n_rounds=cfg.metrics.n_rounds,
             batch_size=cfg.metrics.batch_size,
@@ -662,6 +664,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         ),
         "path_corr": TestCorrelationMetricsModule(
             env=env,
+            reward_module=reward_module,
             bwd_policy_fn=bwd_policy_fn,
             n_rounds=cfg.metrics.n_rounds,
             batch_size=cfg.metrics.batch_size,
@@ -669,6 +672,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         ),
         "markov_blanket_corr": TestCorrelationMetricsModule(
             env=env,
+            reward_module=reward_module,
             bwd_policy_fn=bwd_policy_fn,
             n_rounds=cfg.metrics.n_rounds,
             batch_size=cfg.metrics.batch_size,

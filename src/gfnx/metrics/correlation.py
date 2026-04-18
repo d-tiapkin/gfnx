@@ -240,6 +240,16 @@ class BaseCorrelationMetricsModule(BaseMetricsModule):
             and averaged using logsumexp for numerical stability.
         """
         n_terminal_states = terminal_states.is_pad.shape[0]
+        # Pad to a multiple of batch_size if needed
+        remainder = n_terminal_states % self.batch_size
+        if remainder != 0:
+            pad_width = self.batch_size - remainder
+            terminal_states = jax.tree.map(
+                lambda x: jnp.pad(
+                    x, ((0, pad_width),) + ((0, 0),) * (x.ndim - 1), mode="constant"
+                ),
+                terminal_states,
+            )
         # Use additional batches to avoid OOM
         terminal_states = jax.tree.map(
             lambda x: x.reshape(-1, self.batch_size, *x.shape[1:]),
@@ -275,6 +285,7 @@ class BaseCorrelationMetricsModule(BaseMetricsModule):
             xs=None,
             length=self.n_rounds,
         )
+        log_ratio_traj = log_ratio_traj[:, :n_terminal_states]
         chex.assert_shape(log_ratio_traj, (self.n_rounds, n_terminal_states))
 
         # Average ratios over rounds for each test datum using log-sum-exp

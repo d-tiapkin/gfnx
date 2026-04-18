@@ -188,7 +188,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     )
     # Rollout backward trajectory (Rule 4: vmapped over init_states)
     bwd_rng_keys = jax.random.split(bwd_rng_key, num_envs)
-    true_traj_data, _true_info = jax.vmap(
+    true_traj_data, _, _ = jax.vmap(
         lambda rng, init_state: gfnx.utils.backward_rollout(
             rng, init_state, bwd_policy_fn, model_params, env, env_params
         )

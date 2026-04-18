@@ -79,6 +79,7 @@ class WandBWrapper(BaseLoggerWrapper):
         """Initialize W&B logging session."""
         import wandb
 
+        kwargs.setdefault("settings", wandb.Settings(init_timeout=60))
         wandb.init(*args, **kwargs)
         self.writer = wandb
 

@@ -60,4 +60,24 @@ jobs:
           pip install -e .[baselines,tests]
       - name: Run baselines tests
         run: |
-          pytest tests/baselines -v
+          pytest tests/baselines/test_subtb_hypergrid.py -v
+
+  smoke-baselines:
+    runs-on: ubuntu-latest
+    needs: test-environments
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[baselines,tests]
+      - name: Download phylo datasets
+        run: bash download_ds.sh
+      - name: Run smoke tests
+        run: |
+          pytest tests/baselines/test_baselines_smoke.py -v

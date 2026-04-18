@@ -140,7 +140,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             fwd_logits = policy_outputs["raw_qvalue_logits"]
         do_explore = jax.random.bernoulli(rng_key, cur_epsilon)
         fwd_logits = jnp.where(do_explore, 0, fwd_logits)
-        return fwd_logits, policy_outputs
+        return fwd_logits, {
+            **policy_outputs,
+            "forward_logits": fwd_logits,
+            "backward_logits": jnp.zeros(env.backward_action_space.n),
+        }
 
     rng_keys = jax.random.split(sample_traj_key, num_envs)
     traj_data, final_states, info = jax.vmap(

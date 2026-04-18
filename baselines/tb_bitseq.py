@@ -405,6 +405,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     metrics_module = MultiMetricsModule({
         "correlation": TestCorrelationMetricsModule(
             env=env,
+            reward_module=reward_module,
             bwd_policy_fn=bwd_policy_fn,
             n_rounds=cfg.metrics.n_rounds,
             batch_size=cfg.metrics.batch_size,
@@ -425,11 +426,11 @@ def run_experiment(cfg: OmegaConf) -> None:
     )
     vector_tokenize = jax.vmap(lambda x: gfnx.utils.bitseq.tokenize(x, env.k))
     test_set_tokens = vector_tokenize(binary_test_set)
-    test_set_states = gfnx.BitseqEnvState.from_tokens(test_set_tokens)
+    test_set_states = jax.vmap(gfnx.BitseqEnvState.from_tokens)(test_set_tokens)
     # Initialize the metrics
     mode_set = reward_params.mode_set
     mode_set_tokens = vector_tokenize(mode_set)
-    modes_states = gfnx.BitseqEnvState.from_tokens(mode_set_tokens)
+    modes_states = jax.vmap(gfnx.BitseqEnvState.from_tokens)(mode_set_tokens)
 
     # Here we need to pass the initial parameters for all  metrics
     metrics_state = metrics_module.init(
