@@ -14,7 +14,7 @@ agent:
 
 network:
   num_layers: 1
-  mlp_num_layers: 1
+  mlp_num_layers: 1 # 1 hidden layer + 1 output layer
   embedding_size: 128
   num_heads: 4
 
