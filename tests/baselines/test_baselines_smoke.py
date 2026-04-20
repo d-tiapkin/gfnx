@@ -71,7 +71,9 @@ MULTISEED_BASELINES = [
 ]
 
 
-def _run_baseline(script: str, extra: list[str], cwd: Path, timeout: int = 300) -> subprocess.CompletedProcess:
+def _run_baseline(
+    script: str, extra: list[str], cwd: Path, timeout: int = 300
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["python", f"baselines/{script}.py", *extra],
         cwd=str(cwd),
@@ -82,7 +84,9 @@ def _run_baseline(script: str, extra: list[str], cwd: Path, timeout: int = 300) 
     )
 
 
-@pytest.mark.parametrize("script,extra", STANDARD_BASELINES, ids=[s for s, _ in STANDARD_BASELINES])
+@pytest.mark.parametrize(
+    "script,extra", STANDARD_BASELINES, ids=[s for s, _ in STANDARD_BASELINES]
+)
 def test_baseline_smoke(script, extra, tmp_path):
     log_dir = tmp_path / script
     log_dir.mkdir()
@@ -102,7 +106,9 @@ def test_baseline_smoke(script, extra, tmp_path):
     )
 
 
-@pytest.mark.parametrize("script,extra", MULTISEED_BASELINES, ids=[s for s, _ in MULTISEED_BASELINES])
+@pytest.mark.parametrize(
+    "script,extra", MULTISEED_BASELINES, ids=[s for s, _ in MULTISEED_BASELINES]
+)
 def test_multiseed_baseline_smoke(script, extra, tmp_path):
     log_dir = tmp_path / script
     log_dir.mkdir()
@@ -127,7 +133,8 @@ def phylo_data_dir():
     data_dir = REPO_ROOT / "datasets"
     if not (data_dir / "DS1.json").exists():
         pytest.skip(
-            "Phylogenetic datasets not found. Run `bash download_ds.sh` from the repo root to download them."
+            "Phylogenetic datasets not found. Run `bash download_ds.sh` from the repo root" \
+            " to download them."
         )
     return data_dir
 
