@@ -179,17 +179,24 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
         """Returns forward action given the backward transition (single)."""
         return jnp.where(state.is_terminal, self.stop_action, backward_action)
 
-    def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        """Returns mask of invalid actions for a single state. [dim+1]"""
-        augmented_state = jnp.concat([state.state, jnp.zeros((1,))], axis=-1)
-        return augmented_state == self.side - 1
+    def get_action_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        """Returns the mask of valid forward actions for a single state. [dim+1]
 
-    def get_invalid_backward_mask(self, state: EnvState, params: EnvParams) -> chex.Array:
-        """Returns mask of invalid backward actions for a single state. [dim]"""
+        ``True`` = valid action, ``False`` = invalid (cell already at the
+        upper boundary along that axis).
+        """
+        augmented_state = jnp.concat([state.state, jnp.zeros((1,))], axis=-1)
+        return augmented_state != self.side - 1
+
+    def get_backward_action_mask(self, state: EnvState, params: EnvParams) -> chex.Array:
+        """Returns the mask of valid backward actions for a single state. [dim]
+
+        ``True`` = valid backward move along that axis, ``False`` = invalid.
+        """
         return jax.lax.cond(
             state.is_terminal,
-            lambda x: jnp.ones_like(x, dtype=jnp.bool).at[0].set(False),
-            lambda x: x == 0,
+            lambda x: jnp.zeros_like(x, dtype=jnp.bool).at[0].set(True),
+            lambda x: x != 0,
             state.state,
         )
 

@@ -177,51 +177,49 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
 
     def loss_fn(model, target_model, current_traj_rewards_flat) -> chex.Array:
         num_transition = transitions.pad.shape[0]
-        not_pad_mask = jnp.logical_not(transitions.pad)
+        step_mask = transitions.step_mask
 
         # Step 1. Compute the Q-value
         policy_outputs = jax.vmap(model)(transitions.obs)
-        invalid_mask = env.get_invalid_mask_batch(transitions.state, env_params)
-        valid_mask = jnp.logical_not(invalid_mask)
+        action_mask = env.get_action_mask_batch(transitions.state, env_params)
         if train_state.config.agent.dueling:
             raw_advantage = policy_outputs["unmasked_advantage_logits"]
             value = policy_outputs["value_logits"]
-            qvalue = value + jax.nn.log_softmax(raw_advantage, where=valid_mask, axis=-1)
+            qvalue = value + jax.nn.log_softmax(raw_advantage, where=action_mask, axis=-1)
         else:
             qvalue = policy_outputs["raw_qvalue_logits"]
-            value = jax.nn.logsumexp(qvalue, where=valid_mask, axis=-1)
+            value = jax.nn.logsumexp(qvalue, where=action_mask, axis=-1)
 
         qvalue = jnp.take_along_axis(
             qvalue, jnp.expand_dims(transitions.action, axis=-1), axis=-1
         ).squeeze(-1)
-        padded_q_value = jnp.where(transitions.pad, 0.0, qvalue)
+        padded_q_value = jnp.where(step_mask, qvalue, 0.0)
 
         # Step 2.1: Compute the target Q-value
         target_policy_outputs = jax.vmap(target_model)(transitions.next_obs)
-        next_invalid_actions_mask = env.get_invalid_mask_batch(transitions.next_state, env_params)
-        next_valid_mask = jnp.logical_not(next_invalid_actions_mask)
+        next_action_mask = env.get_action_mask_batch(transitions.next_state, env_params)
         if train_state.config.agent.dueling:
             raw_next_advantage = target_policy_outputs["unmasked_advantage_logits"]
             target_next_value = target_policy_outputs["value_logits"]
             target_next_qvalue = target_next_value + jax.nn.log_softmax(
-                raw_next_advantage, where=next_valid_mask, axis=-1
+                raw_next_advantage, where=next_action_mask, axis=-1
             )
             target_next_value = target_next_value.squeeze(-1)  # should be (N,)
         else:
             target_next_qvalue = target_policy_outputs["raw_qvalue_logits"]
             target_next_value = jax.nn.logsumexp(
-                target_next_qvalue, where=next_valid_mask, axis=-1
+                target_next_qvalue, where=next_action_mask, axis=-1
             )
 
         # Step 2.2: Compute intermidiate rewards.
         bwd_logits = jnp.zeros(
             shape=(num_transition, env.backward_action_space.n), dtype=jnp.float32
         )
-        next_bwd_invalid_mask = env.get_invalid_backward_mask_batch(
+        next_backward_action_mask = env.get_backward_action_mask_batch(
             transitions.next_state, env_params
         )
         bwd_logprobs = gfnx.utils.compute_action_log_probs(
-            bwd_logits, bwd_actions, next_bwd_invalid_mask
+            bwd_logits, bwd_actions, next_backward_action_mask
         )
 
         target = jnp.where(
@@ -229,14 +227,14 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             current_traj_rewards_flat,
             bwd_logprobs + target_next_value,  # (N,) + (N,) = (N,)
         )
-        padded_target = jnp.where(transitions.pad, 0.0, target)
+        padded_target = jnp.where(step_mask, target, 0.0)
 
         # Step 4. Compute the loss
         local_losses = optax.losses.huber_loss(padded_q_value, padded_target)
         local_losses = jnp.where(
             transitions.done, local_losses * train_state.config.agent.leaf_coeff, local_losses
         )
-        return jnp.sum(local_losses * not_pad_mask) / jnp.sum(not_pad_mask)
+        return jnp.sum(local_losses * step_mask) / jnp.sum(step_mask)
 
     mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(
         train_state.model, train_state.target_model, traj_rewards_flat

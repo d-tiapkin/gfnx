@@ -240,11 +240,11 @@ def run_experiment(cfg: OmegaConf) -> None:
             m = eqx.combine(model_params, policy_static)
             policy_outputs_traj = jax.vmap(jax.vmap(m))(current_traj_data.obs)
             fwd_logits_traj = policy_outputs_traj["forward_logits"]
-            invalid_fwd_mask = jax.vmap(env.get_invalid_mask_batch, in_axes=(0, None))(
+            action_mask = jax.vmap(env.get_action_mask_batch, in_axes=(0, None))(
                 current_traj_data.state, env_params
             )
             fwd_logprobs = gfnx.utils.compute_action_log_probs(
-                fwd_logits_traj, current_traj_data.action, invalid_fwd_mask, current_traj_data.pad
+                fwd_logits_traj, current_traj_data.action, action_mask, current_traj_data.step_mask
             )
             log_pf_traj = logZ_val + fwd_logprobs.sum(axis=1)
 
@@ -256,14 +256,14 @@ def run_experiment(cfg: OmegaConf) -> None:
             )
 
             bwd_logits_traj = policy_outputs_traj["backward_logits"]
-            invalid_bwd_mask = jax.vmap(env.get_invalid_backward_mask_batch, in_axes=(0, None))(
+            backward_action_mask = jax.vmap(env.get_backward_action_mask_batch, in_axes=(0, None))(
                 curr_states, env_params
             )
             log_pb_selected = gfnx.utils.compute_action_log_probs(
                 bwd_logits_traj[:, 1:],
                 bwd_actions_traj,
-                invalid_bwd_mask,
-                current_traj_data.pad[:, :-1],
+                backward_action_mask,
+                current_traj_data.step_mask[:, :-1],
             )
             log_pb_sum = log_pb_selected.sum(axis=1)
             target = log_pb_sum + current_log_rewards

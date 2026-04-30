@@ -213,34 +213,32 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
         # is the identity.
         return backward_action
 
-    def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        """Invalid mask for forward actions (single state). [N*N+1].
+    def get_action_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        """Valid forward-action mask (single state). [N*N+1].
 
-        Constructed as a logical OR of the adjacency matrix and the transitive
-        closure of the transposed adjacency matrix — an edge `(i, j)` is
-        invalid if it already exists or if adding it would create a cycle.
-        The stop action (last entry) is always valid.
+        An edge ``(i, j)`` is valid iff it does not yet exist and adding it
+        would not create a cycle. The stop action (last entry) is always valid.
         """
-        mask = jnp.logical_or(state.adjacency_matrix, state.closure_T).reshape(-1)
+        invalid = jnp.logical_or(state.adjacency_matrix, state.closure_T).reshape(-1)
         return jnp.concatenate(
-            [mask, jnp.zeros((1,), dtype=jnp.bool)], axis=0
-        )  # stop action == last action is always valid
+            [jnp.logical_not(invalid), jnp.ones((1,), dtype=jnp.bool)], axis=0
+        )
 
-    def get_invalid_backward_mask(self, state: EnvState, _params: EnvParams) -> chex.Array:
-        """Invalid mask for backward actions (single state). [N*N+1].
+    def get_backward_action_mask(self, state: EnvState, _params: EnvParams) -> chex.Array:
+        """Valid backward-action mask (single state). [N*N+1].
 
-        Inverts the adjacency matrix (we may only un-set existing edges) and
-        allows the stop action only for a terminal state (un-terminate).
+        Only existing edges can be removed; the stop action (un-terminate) is
+        valid only at a terminal state.
         """
         return jax.lax.cond(
             state.is_terminal,
             lambda: jnp.append(
-                jnp.ones((self.num_variables**2,), dtype=jnp.bool),
-                jnp.zeros((1,), dtype=jnp.bool),
+                jnp.zeros((self.num_variables**2,), dtype=jnp.bool),
+                jnp.ones((1,), dtype=jnp.bool),
             ),
             lambda: jnp.append(
-                jnp.logical_not(state.adjacency_matrix).reshape(-1),
-                jnp.ones((1,), dtype=jnp.bool),
+                state.adjacency_matrix.reshape(-1),
+                jnp.zeros((1,), dtype=jnp.bool),
             ),
         )
 

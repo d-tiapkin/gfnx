@@ -194,11 +194,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         traj_len = traj_len_plus1 - 1
 
         # Masks
-        forward_invalid_mask = jax.vmap(current_env.get_invalid_mask_batch, in_axes=(0, None))(
+        action_mask = jax.vmap(current_env.get_action_mask_batch, in_axes=(0, None))(
             current_traj_data.state, current_env_params
         )
-        backward_invalid_mask = jax.vmap(
-            current_env.get_invalid_backward_mask_batch, in_axes=(0, None)
+        backward_action_mask = jax.vmap(
+            current_env.get_backward_action_mask_batch, in_axes=(0, None)
         )(current_traj_data.state, current_env_params)
         forward_action = current_traj_data.action[:, :-1]
         # Compute backward actions
@@ -209,24 +209,24 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             current_env.get_backward_action_batch,
             in_axes=(0, 0, 0, None),
         )(prev_states, fwd_actions, curr_states, current_env_params)
-        pad_mask = current_traj_data.pad[:, :-1]
+        step_mask = current_traj_data.step_mask[:, :-1]
         done_mask = current_traj_data.done[:, :-1]
 
         # Forward log-probs
         log_pf_along_traj = gfnx.utils.compute_action_log_probs(
-            fwd_logits_traj[:, :-1], forward_action, forward_invalid_mask[:, :-1], pad_mask
+            fwd_logits_traj[:, :-1], forward_action, action_mask[:, :-1], step_mask
         )
 
         # Backward log-probs
         log_pb_along_traj = gfnx.utils.compute_action_log_probs(
-            bwd_logits_traj[:, 1:], bwd_actions_traj, backward_invalid_mask[:, 1:], pad_mask
+            bwd_logits_traj[:, 1:], bwd_actions_traj, backward_action_mask[:, 1:], step_mask
         )
 
         # log_flow
         log_flow_traj = log_flow_traj.at[:, 1:].set(
             jnp.where(done_mask, current_log_rewards[:, jnp.newaxis], log_flow_traj[:, 1:])
         )
-        log_flow_traj = log_flow_traj.at[:, 1:].set(jnp.where(pad_mask, 0.0, log_flow_traj[:, 1:]))
+        log_flow_traj = log_flow_traj.at[:, 1:].set(jnp.where(step_mask, 0.0, log_flow_traj[:, 1:]))
 
         def process_one_traj(log_pf, log_pb, log_flow, done, pad):
             def process_pair_idx(i, j, log_pf, log_pb, log_flow, done, pad):
@@ -251,7 +251,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             log_pb_along_traj,
             log_flow_traj,
             done_mask,
-            pad_mask,
+            step_mask,
         ).mean()
 
     # Prepare parameters for the loss function and gradient calculation

@@ -197,11 +197,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         fwd_logits_traj = policy_outputs_traj["forward_logits"]
 
         # Calculate forward masks.
-        # jax.vmap is used to apply get_invalid_mask over the time dimension 1
+        # jax.vmap is used to apply get_action_mask over the time dimension 1
         # of current_traj_data.state. Leaves in current_traj_data.state
         # are expected to have shape (batch_size, time, ...).
-        invalid_fwd_mask_batch_time_actions = jax.vmap(
-            current_env.get_invalid_mask_batch,
+        action_mask_batch_time_actions = jax.vmap(
+            current_env.get_action_mask_batch,
             in_axes=(0, None),
         )(current_traj_data.state, current_env_params)
         # Resulting shape: (batch_size, time, num_fwd_actions)
@@ -209,8 +209,8 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         fwd_logprobs_traj = gfnx.utils.compute_action_log_probs(
             fwd_logits_traj,
             current_traj_data.action,
-            invalid_fwd_mask_batch_time_actions,
-            current_traj_data.pad,
+            action_mask_batch_time_actions,
+            current_traj_data.step_mask,
         )
         sum_log_pf_along_traj = fwd_logprobs_traj.sum(axis=1)
         log_pf_traj = logZ_val + sum_log_pf_along_traj  # Use extracted logZ_val
@@ -247,9 +247,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         # Calculate backward masks using curr_states_for_bwd
         # (states from t=1 to T).
         # These are the states *from which* backward actions are taken.
-        # jax.vmap maps get_invalid_backward_mask over the time dimension (1).
-        invalid_bwd_mask_batch_time_actions = jax.vmap(
-            current_env.get_invalid_backward_mask_batch,
+        # jax.vmap maps get_backward_action_mask over the time dimension (1).
+        backward_action_mask_batch_time_actions = jax.vmap(
+            current_env.get_backward_action_mask_batch,
             in_axes=(0, None),
         )(curr_states_for_bwd, current_env_params)
         # Resulting shape: (batch_size, max_len, num_bwd_actions)
@@ -259,8 +259,8 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         log_pb_selected = gfnx.utils.compute_action_log_probs(
             bwd_logits_for_pb,
             bwd_actions_traj,
-            invalid_bwd_mask_batch_time_actions,
-            current_traj_data.pad[:, :-1],
+            backward_action_mask_batch_time_actions,
+            current_traj_data.step_mask[:, :-1],
         )
         log_pb_sum = jnp.sum(log_pb_selected, axis=1)
         target = log_pb_sum + current_log_rewards

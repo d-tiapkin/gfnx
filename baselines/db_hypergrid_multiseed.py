@@ -243,20 +243,20 @@ def run_experiment(cfg: OmegaConf) -> None:
             policy_outputs = jax.vmap(m)(transitions.obs)
             fwd_logits = policy_outputs["forward_logits"]
             log_flow = policy_outputs["log_flow"]
-            invalid_mask = env.get_invalid_mask_batch(transitions.state, env_params)
+            action_mask = env.get_action_mask_batch(transitions.state, env_params)
             fwd_logprobs = gfnx.utils.compute_action_log_probs(
-                fwd_logits, transitions.action, invalid_mask
+                fwd_logits, transitions.action, action_mask
             )
 
             # Next state
             next_policy_outputs = jax.vmap(m)(transitions.next_obs)
             next_log_flow = next_policy_outputs["log_flow"]
             bwd_logits = next_policy_outputs["backward_logits"]
-            next_bwd_invalid_mask = env.get_invalid_backward_mask_batch(
+            next_backward_action_mask = env.get_backward_action_mask_batch(
                 transitions.next_state, env_params
             )
             bwd_logprobs = gfnx.utils.compute_action_log_probs(
-                bwd_logits, bwd_actions, next_bwd_invalid_mask
+                bwd_logits, bwd_actions, next_backward_action_mask
             )
 
             target = jnp.where(
@@ -264,12 +264,12 @@ def run_experiment(cfg: OmegaConf) -> None:
                 bwd_logprobs + current_traj_rewards_flat,
                 bwd_logprobs + next_log_flow,
             )
-            not_pad = jnp.logical_not(transitions.pad)
+            step_mask = transitions.step_mask
             loss = optax.losses.squared_error(
-                jnp.where(transitions.pad, 0.0, fwd_logprobs + log_flow),
-                jnp.where(transitions.pad, 0.0, target),
+                jnp.where(step_mask, fwd_logprobs + log_flow, 0.0),
+                jnp.where(step_mask, target, 0.0),
             )
-            return loss.sum() / not_pad.sum()
+            return loss.sum() / step_mask.sum()
 
         _mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(
             state.model_params, traj_rewards_flat

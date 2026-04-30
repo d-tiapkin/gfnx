@@ -29,6 +29,15 @@ class TrajectoryData:
     pad: Bool[Array, " time"]
     info: dict  # [T+1 x ...]
 
+    @property
+    def step_mask(self) -> Bool[Array, " time"]:
+        """Boolean mask over the time axis: ``True`` for real (non-padding) steps.
+
+        Equivalent to ``jnp.logical_not(self.pad)``. Use directly with
+        ``masked_sum`` / ``masked_mean`` and JAX ops that accept ``where=``.
+        """
+        return jnp.logical_not(self.pad)
+
 
 @chex.dataclass
 class TransitionData:
@@ -39,6 +48,15 @@ class TransitionData:
     next_state: TEnvState  # [T x ...]
     done: Bool[Array, " transitions"]
     pad: Bool[Array, " transitions"]
+
+    @property
+    def step_mask(self) -> Bool[Array, " transitions"]:
+        """Boolean mask over the time axis: ``True`` for real (non-padding) transitions.
+
+        Equivalent to ``jnp.logical_not(self.pad)``. Use directly with
+        ``masked_sum`` / ``masked_mean`` and JAX ops that accept ``where=``.
+        """
+        return jnp.logical_not(self.pad)
 
 
 def forward_rollout(
@@ -64,7 +82,7 @@ def forward_rollout(
             shape `[n_actions]`; the info dict may include forward/backward
             logits under the keys `fwd_logits` and `bwd_logits`.
         policy_params: Parameters consumed by `policy_fn`.
-        env: Environment instance exposing `reset`, `step`, and `get_invalid_mask`.
+        env: Environment instance exposing `reset`, `step`, and `get_action_mask`.
         env_params: Environment parameters (typically static).
 
     Returns:
@@ -90,7 +108,7 @@ def forward_rollout(
         env,
         env_params,
         env.step,
-        env.get_invalid_mask,
+        env.get_action_mask,
     )
 
 
@@ -118,7 +136,7 @@ def backward_rollout(
             logits of shape `[n_bwd_actions]`.
         policy_params: Parameters consumed by `policy_fn`.
         env: Environment instance exposing `get_obs`, `backward_step`,
-            and `get_invalid_backward_mask`.
+            and `get_backward_action_mask`.
         env_params: Environment parameters (typically static).
 
     Returns:
@@ -135,7 +153,7 @@ def backward_rollout(
         env,
         env_params,
         env.backward_step,
-        env.get_invalid_backward_mask,
+        env.get_backward_action_mask,
     )
 
 
@@ -148,7 +166,7 @@ def _generic_rollout(
     env: TEnvironment,
     env_params: TEnvParams,
     step_fn: callable,
-    mask_fn: callable,
+    action_mask_fn: callable,
 ) -> tuple[TrajectoryData, TEnvState, dict]:
     """Common single-environment rollout implementation shared by forward/backward helpers.
 
@@ -163,7 +181,8 @@ def _generic_rollout(
         env_params: Environment parameters (typically static).
         step_fn: Function with signature
             `step_fn(env_state, action, env_params) -> tuple[TObs, TEnvState, Bool, dict]`.
-        mask_fn: Function producing invalid-action masks for the current state.
+        action_mask_fn: Function producing the action mask for the current
+            state (``True`` = valid action; see :meth:`BaseEnvironment.get_action_mask`).
 
     Returns:
         A `(TrajectoryData, final_state, info)` tuple containing a padded
@@ -186,15 +205,15 @@ def _generic_rollout(
 
         rng_key, policy_rng_key, sample_rng_key = jax.random.split(rng_key, 3)
 
-        invalid_mask = mask_fn(env_state, env_params)
+        action_mask = action_mask_fn(env_state, env_params)
         logits, policy_info = policy_fn(policy_rng_key, env_obs, policy_params)
-        policy_probs = jax.nn.softmax(logits, where=jnp.logical_not(invalid_mask), axis=-1)
-        policy_log_probs = jax.nn.log_softmax(logits, where=jnp.logical_not(invalid_mask), axis=-1)
+        policy_probs = jax.nn.softmax(logits, where=action_mask, axis=-1)
+        policy_log_probs = jax.nn.log_softmax(logits, where=action_mask, axis=-1)
         action = jax.random.categorical(sample_rng_key, policy_log_probs, axis=-1)
         next_obs, next_env_state, done, step_info = step_fn(env_state, action, env_params)
         sampled_log_prob = policy_log_probs[action]
         info = {
-            "entropy": -masked_sum(policy_probs * policy_log_probs, jnp.logical_not(invalid_mask)),
+            "entropy": -masked_sum(policy_probs * policy_log_probs, action_mask),
             "sampled_log_prob": sampled_log_prob,
             **step_info,
             **policy_info,
@@ -226,9 +245,9 @@ def _generic_rollout(
     # traj_data shape: [T+1, ...] — scan is time-major, no batch dim for single env
     chex.assert_tree_shape_prefix(traj_data, (env.max_steps_in_episode + 1,))
     final_state = final_traj_state.env_state
-    not_pad = jnp.logical_not(traj_data.pad)
-    traj_entropy = masked_sum(traj_data.info["entropy"], not_pad)
-    trajectory_length = jnp.sum(not_pad.astype(jnp.int32))
+    step_mask = traj_data.step_mask
+    traj_entropy = masked_sum(traj_data.info["entropy"], step_mask)
+    trajectory_length = jnp.sum(step_mask.astype(jnp.int32))
 
     return (
         traj_data,
@@ -303,8 +322,8 @@ def _compute_trajectory_log_probs(
         fwd_actions = traj_data.action[:-1]  # [T]
         bwd_actions = env.get_backward_action_batch(states, fwd_actions, next_states, env_params)
 
-        fwd_action_mask = env.get_invalid_mask_batch(states, env_params)
-        bwd_action_mask = env.get_invalid_backward_mask_batch(next_states, env_params)
+        fwd_action_mask = env.get_action_mask_batch(states, env_params)
+        bwd_action_mask = env.get_backward_action_mask_batch(next_states, env_params)
     else:
         prev_states = jax.tree.map(lambda x: x[1:], traj_data.state)
 
@@ -314,10 +333,10 @@ def _compute_trajectory_log_probs(
         bwd_actions = traj_data.action[:-1]  # [T]
         fwd_actions = env.get_forward_action_batch(states, bwd_actions, prev_states, env_params)
 
-        bwd_action_mask = env.get_invalid_backward_mask_batch(states, env_params)
-        fwd_action_mask = env.get_invalid_mask_batch(prev_states, env_params)
+        bwd_action_mask = env.get_backward_action_mask_batch(states, env_params)
+        fwd_action_mask = env.get_action_mask_batch(prev_states, env_params)
 
-    not_pad = jnp.logical_not(traj_data.pad[:-1])
+    step_mask = traj_data.step_mask[:-1]
     sampled_forward_logprobs = compute_action_log_probs(
         forward_logits, fwd_actions, fwd_action_mask
     )
@@ -325,8 +344,8 @@ def _compute_trajectory_log_probs(
         backward_logits, bwd_actions, bwd_action_mask
     )
 
-    log_pf_traj = masked_sum(sampled_forward_logprobs, not_pad)
-    log_pb_traj = masked_sum(sampled_backward_logprobs, not_pad)
+    log_pf_traj = masked_sum(sampled_forward_logprobs, step_mask)
+    log_pb_traj = masked_sum(sampled_backward_logprobs, step_mask)
     return log_pf_traj, log_pb_traj
 
 

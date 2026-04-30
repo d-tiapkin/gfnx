@@ -282,13 +282,13 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
             rng_key, subkey = jax.random.split(rng_key)
 
             obs_batch = jax.vmap(self.env.get_obs, in_axes=(0, None))(states_batch, env_params)
-            invalid_mask_batch = self.env.get_invalid_mask_batch(states_batch, env_params)
+            action_mask_batch = self.env.get_action_mask_batch(states_batch, env_params)
 
             fwd_policy_logits, _ = jax.vmap(
                 lambda key, obs: self.fwd_policy_fn(key, obs, policy_params)
             )(jax.random.split(subkey, obs_batch.shape[0]), obs_batch)
             fwd_policy_probs = jax.nn.softmax(
-                fwd_policy_logits, axis=-1, where=jnp.logical_not(invalid_mask_batch)
+                fwd_policy_logits, axis=-1, where=action_mask_batch
             )
             return rng_key, fwd_policy_probs
 

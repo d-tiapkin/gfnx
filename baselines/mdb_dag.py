@@ -361,9 +361,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         policy_outputs = model(transitions.obs)
         # Compute the forward log-probs
         fwd_logits = policy_outputs["forward_logits"]
-        invalid_mask = env.get_invalid_mask_batch(transitions.state, env_params)
+        action_mask = env.get_action_mask_batch(transitions.state, env_params)
         fwd_all_log_probs = jax.nn.log_softmax(
-            fwd_logits, where=jnp.logical_not(invalid_mask), axis=-1
+            fwd_logits, where=action_mask, axis=-1
         )
         sink_logprobs = fwd_all_log_probs[:, -1]
         fwd_logprobs = jnp.take_along_axis(
@@ -375,18 +375,18 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         # Compute the stats for the next state
         next_policy_outputs = train_state.target_model(transitions.next_obs)
         next_fwd_logits = next_policy_outputs["forward_logits"]
-        next_fwd_invalid_mask = env.get_invalid_mask_batch(transitions.next_state, env_params)
+        next_action_mask = env.get_action_mask_batch(transitions.next_state, env_params)
         next_fwd_all_log_probs = jax.nn.log_softmax(
-            next_fwd_logits, where=jnp.logical_not(next_fwd_invalid_mask), axis=-1
+            next_fwd_logits, where=next_action_mask, axis=-1
         )
         next_sink_logprobs = next_fwd_all_log_probs[:, -1]
 
         bwd_logits = next_policy_outputs["backward_logits"]
-        next_bwd_invalid_mask = env.get_invalid_backward_mask_batch(
+        next_backward_action_mask = env.get_backward_action_mask_batch(
             transitions.next_state, env_params
         )
         bwd_logprobs = gfnx.utils.compute_action_log_probs(
-            bwd_logits, bwd_actions, next_bwd_invalid_mask
+            bwd_logits, bwd_actions, next_backward_action_mask
         )
         delta_score = jax.vmap(
             train_state.reward_module.delta_score,
@@ -399,11 +399,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             train_state.reward_params,
         )
 
-        # Compute the MDB loss with masking
-        done_or_pad = transitions.done | transitions.pad
+        # Compute the MDB loss only over active (non-terminal, non-padding) transitions.
+        active = transitions.step_mask & jnp.logical_not(transitions.done)
         error = next_sink_logprobs + fwd_logprobs - sink_logprobs - bwd_logprobs - delta_score
-        error = jnp.where(done_or_pad, 0.0, error)
-        return optax.huber_loss(error).sum() / jnp.logical_not(done_or_pad).sum()
+        error = jnp.where(active, error, 0.0)
+        return optax.huber_loss(error).sum() / active.sum()
 
     mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(train_state.model)
     # Step 3. Update the model with grads

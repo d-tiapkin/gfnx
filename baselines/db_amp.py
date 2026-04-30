@@ -174,9 +174,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         )(transitions.obs, jax.random.split(rng_key, batch_size))
         # Compute the forward log-probs
         fwd_logits = policy_outputs["forward_logits"]
-        invalid_mask = env.get_invalid_mask_batch(transitions.state, env_params)
+        action_mask = env.get_action_mask_batch(transitions.state, env_params)
         fwd_logprobs = gfnx.utils.compute_action_log_probs(
-            fwd_logits, transitions.action, invalid_mask
+            fwd_logits, transitions.action, action_mask
         )
         log_flow = policy_outputs["log_flow"]
 
@@ -185,11 +185,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             lambda x, key: model(x, enable_dropout=True, key=key), in_axes=(0, 0)
         )(transitions.next_obs, jax.random.split(rng_key, batch_size))
         bwd_logits = next_policy_outputs["backward_logits"]
-        next_bwd_invalid_mask = env.get_invalid_backward_mask_batch(
+        next_backward_action_mask = env.get_backward_action_mask_batch(
             transitions.next_state, env_params
         )
         bwd_logprobs = gfnx.utils.compute_action_log_probs(
-            bwd_logits, bwd_actions, next_bwd_invalid_mask
+            bwd_logits, bwd_actions, next_backward_action_mask
         )
         next_log_flow = next_policy_outputs["log_flow"]
         # Replace the target with the log reward if the episode is done
@@ -199,18 +199,18 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             bwd_logprobs + next_log_flow,
         )
 
-        # Compute the DB loss with masking
-        transition = jnp.logical_not(transitions.pad)
+        # Compute the DB loss with masking (split between leaf/non-leaf transitions).
+        step_mask = transitions.step_mask
         done = transitions.done
         not_done = jnp.logical_not(transitions.done)
 
         loss = optax.l2_loss(
-            jnp.where(transitions.pad, 0.0, fwd_logprobs + log_flow),
-            jnp.where(transitions.pad, 0.0, target),
+            jnp.where(step_mask, fwd_logprobs + log_flow, 0.0),
+            jnp.where(step_mask, target, 0.0),
         )
 
-        leaf_loss = gfnx.utils.masked_mean(loss, jnp.logical_and(transition, done))
-        flow_loss = gfnx.utils.masked_mean(loss, jnp.logical_and(transition, not_done))
+        leaf_loss = gfnx.utils.masked_mean(loss, jnp.logical_and(step_mask, done))
+        flow_loss = gfnx.utils.masked_mean(loss, jnp.logical_and(step_mask, not_done))
 
         return leaf_loss * 25 + flow_loss
 
