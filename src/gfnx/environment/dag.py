@@ -112,7 +112,7 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
         `adjacency_t[i, j] = True` means there's an edge `i -> j` in G^T.
         """
         d = adjacency_t.shape[0]
-        visited_init = jnp.zeros(d, dtype=bool).at[start].set(True)
+        visited_init = jnp.zeros(d, dtype=jnp.bool).at[start].set(True)
         frontier_init = visited_init
 
         def cond_fun(carry):

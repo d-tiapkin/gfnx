@@ -194,6 +194,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             in_axes=(0, 0, 0, None),
         )(prev_states, fwd_actions, curr_states, current_env_params)
         step_mask = current_traj_data.step_mask[:, :-1]
+        pad_mask = current_traj_data.pad[:, :-1]
         done_mask = current_traj_data.done[:, :-1]
 
         # Forward log-probs
@@ -210,7 +211,9 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         log_flow_traj = log_flow_traj.at[:, 1:].set(
             jnp.where(done_mask, current_log_rewards[:, jnp.newaxis], log_flow_traj[:, 1:])
         )
-        log_flow_traj = log_flow_traj.at[:, 1:].set(jnp.where(step_mask, 0.0, log_flow_traj[:, 1:]))
+        log_flow_traj = log_flow_traj.at[:, 1:].set(
+            jnp.where(step_mask, log_flow_traj[:, 1:], 0.0)
+        )
 
         def process_one_traj(log_pf, log_pb, log_flow, done, pad):
             def process_pair_idx(i, j, log_pf, log_pb, log_flow, done, pad):
@@ -235,7 +238,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             log_pb_along_traj,
             log_flow_traj,
             done_mask,
-            step_mask,
+            pad_mask,
         ).mean()
 
     # Prepare parameters for the loss function and gradient calculation

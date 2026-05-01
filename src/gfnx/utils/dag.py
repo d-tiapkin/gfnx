@@ -45,7 +45,7 @@ def adj_to_index(adj: chex.Array, all_adjacencies_flat_bits: chex.Array) -> chex
 
 
 # TODO: (agarkovv) Make jit compatible
-def construct_all_dags(num_variables):
+def construct_all_dags(num_variables : int) -> chex.Array:
     """
     Return all possible adjacency matrices for DAGs with a given number of variables
     Shape: (num_graphs, num_variables, num_variables)
@@ -76,7 +76,7 @@ def construct_all_dags(num_variables):
     compressed_dags = sorted(compressed_dags)
     compressed_dags = np.array(compressed_dags)
     adjacencies = np.unpackbits(compressed_dags, axis=1, count=num_variables**2)
-    return jnp.array(adjacencies.reshape(-1, num_variables, num_variables))
+    return jnp.array(adjacencies.reshape(-1, num_variables, num_variables), dtype=jnp.bool)
 
 
 def get_transitive_closure(adjacency_matrix: chex.Array) -> chex.Array:
