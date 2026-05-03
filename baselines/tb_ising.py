@@ -197,7 +197,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     def get_traj_probs(
         traj_data,
         model: MLPPolicy,
-        get_invalid_mask_fn: Callable,
+        get_action_mask_fn: Callable,
         logits_key: str,
     ) -> chex.Array:
         """
@@ -205,7 +205,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         Args:
             traj_data: gfnx.TrajectoryData - trajectory data
             model: MLPPolicy - model
-            get_invalid_mask_fn: Callable - function to get invalid mask
+            get_action_mask_fn: Callable - function to get invalid mask
             logits_key: str - key to get logits (forward or backward)
         Returns:
             log_probs_traj: chex.Array - log probabilities of the trajectory
@@ -214,18 +214,18 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             traj_data.obs
         )  # (num_envs, max_steps_in_episode + 1, ...)
         logits_traj = policy_outputs_traj[logits_key]
-        invalid_mask_traj = jax.vmap(get_invalid_mask_fn, in_axes=(0, None))(
+        action_mask_traj = jax.vmap(get_action_mask_fn, in_axes=(0, None))(
             traj_data.state, env_params
         )
         log_probs_traj = gfnx.utils.compute_action_log_probs(
-            logits_traj, traj_data.action, invalid_mask_traj, traj_data.pad
+            logits_traj, traj_data.action, action_mask_traj, traj_data.valid
         )
         return log_probs_traj.sum(axis=1)  # (num_envs,)
 
     def get_reverse_traj_probs(
         traj_data,
         model: MLPPolicy,
-        get_invalid_mask_fn: Callable,
+        get_action_mask_fn: Callable,
         get_action_fn: Callable,
         logits_key: str,
     ) -> chex.Array:
@@ -234,7 +234,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         Args:
             traj_data: gfnx.TrajectoryData - trajectory data
             model: MLPPolicy - model
-            get_invalid_mask_fn: Callable - function to get invalid mask
+            get_action_mask_fn: Callable - function to get invalid mask
             get_action_fn: Callable - function to get action
             logits_key: str - key to get logits (forward or backward)
         Returns:
@@ -248,11 +248,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             state, action, prev_or_next_state, env_params
         )  # (num_envs, max_steps_in_episode, ...)
         reverse_logits_traj = jax.vmap(jax.vmap(model))(traj_data.obs[:, 1:])[logits_key]
-        invalid_mask_traj = jax.vmap(get_invalid_mask_fn, in_axes=(0, None))(
+        action_mask_traj = jax.vmap(get_action_mask_fn, in_axes=(0, None))(
             prev_or_next_state, env_params
         )
         reverse_log_probs_traj = gfnx.utils.compute_action_log_probs(
-            reverse_logits_traj, reverse_action_traj, invalid_mask_traj, traj_data.pad[:, :-1]
+            reverse_logits_traj, reverse_action_traj, action_mask_traj, traj_data.valid[:, :-1]
         )
         return reverse_log_probs_traj.sum(axis=1)  # (num_envs,)
 
@@ -270,13 +270,13 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         log_pf_traj = get_traj_probs(
             fake_traj_data,
             model,
-            env.get_invalid_mask_batch,
+            env.get_action_mask_batch,
             "forward_logits",
         )  # (num_envs,)
         log_pb_traj = get_reverse_traj_probs(
             fake_traj_data,
             model,
-            env.get_invalid_backward_mask_batch,
+            env.get_backward_action_mask_batch,
             env.get_backward_action_batch,
             "backward_logits",
         )  # (num_envs,)
@@ -292,27 +292,27 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         true_log_pf_traj = get_reverse_traj_probs(
             true_traj_data,
             train_state.model,
-            env.get_invalid_mask_batch,
+            env.get_action_mask_batch,
             env.get_forward_action_batch,
             "forward_logits",
         )
         true_log_pb_traj = get_traj_probs(
             true_traj_data,
             train_state.model,
-            env.get_invalid_backward_mask_batch,
+            env.get_backward_action_mask_batch,
             "backward_logits",
         )
 
         fake_log_pf_traj = get_traj_probs(
             fake_traj_data,
             train_state.model,
-            env.get_invalid_mask_batch,
+            env.get_action_mask_batch,
             "forward_logits",
         )
         fake_log_pb_traj = get_reverse_traj_probs(
             fake_traj_data,
             train_state.model,
-            env.get_invalid_backward_mask_batch,
+            env.get_backward_action_mask_batch,
             env.get_backward_action_batch,
             "backward_logits",
         )

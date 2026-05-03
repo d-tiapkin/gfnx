@@ -77,7 +77,9 @@ where F̃_θ(s) = exp(E(s)) · F_θ(s). Used for phylogenetic trees.
 
 ### `BaseEnvState`
 Chex frozen dataclass. Every concrete state inherits from this and adds domain fields.
-Always has: `is_terminal []`, `is_initial []`, `is_pad []`.
+Always has: `is_terminal []`, `is_initial []`, `is_pad []`. The derived
+`is_valid` property (`= ~is_pad`) is provided as a convenience for masking ops
+that follow the library convention `True = include` (see "Mask convention").
 
 ### `BaseEnvParams`
 Chex frozen dataclass. Every concrete `EnvParams` inherits from this. Contains only dynamics parameters — **reward params are NOT stored here** (see reward decoupling below).
@@ -101,16 +103,16 @@ Key methods (all single-instance):
 | `step(state, action, env_params)` | `-> (obs, next_state, done, info)` | Single step; no reward returned |
 | `backward_step(state, bwd_action, env_params)` | `-> (obs, state, done, info)` | Single backward step |
 | `get_obs(state, env_params)` | `-> chex.ArrayTree` | Single state → single obs |
-| `get_invalid_mask(state, env_params)` | `-> Bool[n_actions]` | Single state → mask |
-| `get_invalid_backward_mask(state, env_params)` | `-> Bool[n_bwd_actions]` | Single state → mask |
+| `get_action_mask(state, env_params)` | `-> Bool[n_actions]` | Single state → action mask (`True` = valid) |
+| `get_backward_action_mask(state, env_params)` | `-> Bool[n_bwd_actions]` | Single state → backward action mask (`True` = valid) |
 | `get_backward_action(state, fwd_action, next_state, env_params)` | `-> Array` | Scalar backward action |
 | `get_forward_action(state, bwd_action, prev_state, env_params)` | `-> Array` | Scalar forward action |
 
 **Convenience batched methods** (defined in `BaseEnvironment`, not overridden):
 | Method | Signature | Notes |
 |--------|-----------|-------|
-| `get_invalid_mask_batch(state, env_params)` | `-> Bool[B, n_actions]` | For use in `loss_fn` |
-| `get_invalid_backward_mask_batch(state, env_params)` | `-> Bool[B, n_bwd_actions]` | For use in `loss_fn` |
+| `get_action_mask_batch(state, env_params)` | `-> Bool[B, n_actions]` | For use in `loss_fn` (`True` = valid) |
+| `get_backward_action_mask_batch(state, env_params)` | `-> Bool[B, n_bwd_actions]` | For use in `loss_fn` (`True` = valid) |
 | `get_backward_action_batch(state, fwd_action, next_state, env_params)` | `-> Array[B]` | For use in `loss_fn` |
 | `get_forward_action_batch(state, bwd_action, prev_state, env_params)` | `-> Array[B]` | For use in `loss_fn` |
 
@@ -274,31 +276,44 @@ forward_trajectory_log_probs(env, fwd_traj_data, env_params) -> (log_pf, log_pb)
 backward_trajectory_log_probs(env, bwd_traj_data, env_params) -> (log_pf, log_pb)  # scalars
 ```
 
+### Mask convention
+
+Every ``*_mask`` argument throughout the library uses **`True = valid /
+include`**. That is, a `True` entry means "count this element / consider this
+action / keep this step". This matches `jax.nn.{soft,log_soft}max(..., where=mask)`
+and the `mask=` argument of `masked_sum` / `masked_mean`.
+
+State/condition fields (`is_pad`, `is_terminal`, `is_initial`, `done`) keep
+their natural "this state IS X" semantics — `True` means "this is a padding /
+terminal / done step". For mask use, prefer the derived complement property:
+`BaseEnvState.is_valid` (`= ~is_pad`) and `TrajectoryData.valid` /
+`TransitionData.valid` (`= ~pad`).
+
 ### Masking utilities (`src/gfnx/utils/masking.py`)
 
 ```python
-compute_action_log_probs(logits, actions, invalid_mask, pad_mask=None) -> Array
-# Full pipeline: log_softmax(where=~invalid_mask) → take_along_axis → optional zero-out pads.
-# logits: [..., n_actions], actions: [...], invalid_mask: [..., n_actions]
-# Returns: [...] log probabilities of selected actions; padded steps are set to 0.0.
+compute_action_log_probs(logits, actions, action_mask, step_mask=None) -> Array
+# Full pipeline: log_softmax(where=action_mask) → take_along_axis → optional zero-out pads.
+# logits: [..., n_actions], actions: [...], action_mask: [..., n_actions] (True = valid).
+# step_mask: optional [...] (True = real step). Padding steps are set to 0.0.
 ```
 
 Replaces the 3-line boilerplate in every baseline's loss function:
 ```python
 # Before (3 lines):
-all_log_probs = jax.nn.log_softmax(logits, where=jnp.logical_not(invalid_mask), axis=-1)
+all_log_probs = jax.nn.log_softmax(logits, where=action_mask, axis=-1)
 selected = jnp.take_along_axis(all_log_probs, jnp.expand_dims(actions, -1), axis=-1).squeeze(-1)
-selected = jnp.where(pad, 0.0, selected)
+selected = jnp.where(step_mask, selected, 0.0)
 
 # After (1 line):
-selected = gfnx.utils.compute_action_log_probs(logits, actions, invalid_mask, pad_mask)
+selected = gfnx.utils.compute_action_log_probs(logits, actions, action_mask, step_mask)
 ```
 
 Also, additional useful utility functions
 
 ```python
-masked_sum(x, mask, axis=-1) -> Array
-masked_mean(x, mask, axis=-1) -> Array
+masked_sum(x, mask, axis=-1) -> Array   # mask: True = include
+masked_mean(x, mask, axis=-1) -> Array  # mask: True = include
 ```
 
 Used as
@@ -370,7 +385,7 @@ def policy_fn(rng_key, env_obs, policy_params) -> (logits: Array[n_actions], inf
    - Rollout (vmapped single-env): `traj_data, final_states, info = jax.vmap(lambda rng: forward_rollout(rng, ...))(rng_keys)`
    - **Reward**: `log_rewards = jax.vmap(reward_module.log_reward, in_axes=(0, None))(final_states, reward_params)` → `[B]`
    - **Transitions**: `transitions = jax.tree.map(lambda x: x.reshape((-1,) + x.shape[2:]), jax.vmap(split_traj_to_transitions)(traj_data))`
-   - **Env methods in loss_fn**: use `env.get_invalid_mask_batch`, `env.get_invalid_backward_mask_batch`, `env.get_backward_action_batch`
+   - **Env methods in loss_fn**: use `env.get_action_mask_batch`, `env.get_backward_action_mask_batch`, `env.get_backward_action_batch` (all action masks follow `True = valid`)
    - **Log-probs in loss_fn**: `gfnx.utils.compute_action_log_probs(logits, actions, mask, pad_mask)` → scalar log prob per step
    - Loss: `eqx.filter_value_and_grad(loss_fn)(...)`
    - Update: `optimizer.update(grads, opt_state, params)`
@@ -474,7 +489,7 @@ Key constraints for vmap-compatible training loops:
 
 | Pattern | Location | Purpose |
 |---------|----------|---------|
-| `jax.vmap(env.get_invalid_mask, in_axes=(0, None))` | `base.py:get_invalid_mask_batch` | Vectorize single-env mask method over batch; defined once in base class |
+| `jax.vmap(env.get_action_mask, in_axes=(0, None))` | `base.py:get_action_mask_batch` | Vectorize single-env mask method over batch; defined once in base class |
 | `jax.vmap(jax.vmap(fn))` | training scripts | Double-vmap over `[B, T, ...]` trajectories |
 | `jax.lax.scan` | `rollout.py:forward_rollout` | Unroll episode steps without Python loop |
 | `jax.lax.cond` | `environment/*.py`, `metrics/base.py:step` | Conditional branching under JIT; used in both env transitions and metric eval gating |

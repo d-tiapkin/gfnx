@@ -5,6 +5,7 @@ from typing import Any, Generic, TypeVar
 
 import chex
 import jax
+import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float
 
 TEnvironment = TypeVar("TEnvironment", bound="BaseEnvironment")
@@ -27,6 +28,18 @@ class BaseEnvState:
     is_terminal: Bool[Array, ""]
     is_initial: Bool[Array, ""]
     is_pad: Bool[Array, ""]
+
+    @property
+    def is_valid(self) -> Bool[Array, ""]:
+        """Whether the state corresponds to a real (non-padding) step.
+
+        Convention: ``True`` for a real step, ``False`` for padding (the
+        complement of :attr:`is_pad`, exposed for the ``True = include``
+        masking convention used throughout the library). Pass directly to
+        ``masked_sum`` / ``masked_mean`` or as ``where=`` to JAX reductions;
+        no negation needed.
+        """
+        return jnp.logical_not(self.is_pad)
 
 
 @chex.dataclass(frozen=True)
@@ -165,17 +178,31 @@ class BaseEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         raise NotImplementedError
 
     @abstractmethod
-    def get_invalid_mask(
+    def get_action_mask(
         self, state: TEnvState, env_params: TEnvParams
     ) -> Bool[Array, " n_actions"]:
-        """Returns mask of invalid forward actions for a single state. Not batched."""
+        """Returns the mask of currently valid forward actions for a single state.
+
+        Convention: ``True`` at index ``a`` means action ``a`` is **valid** (allowed)
+        in this state; ``False`` means **invalid** (forbidden). Use directly with
+        ``jax.nn.log_softmax(logits, where=action_mask, axis=-1)`` and with
+        ``masked_sum`` / ``masked_mean`` (all of which treat ``True`` as include).
+
+        Not batched — apply ``jax.vmap`` for batches, or use ``get_action_mask_batch``.
+        """
         raise NotImplementedError
 
     @abstractmethod
-    def get_invalid_backward_mask(
+    def get_backward_action_mask(
         self, state: TEnvState, env_params: TEnvParams
     ) -> Bool[Array, " n_bwd_actions"]:
-        """Returns mask of invalid backward actions for a single state. Not batched."""
+        """Returns the mask of currently valid backward actions for a single state.
+
+        Convention: ``True`` = valid backward action, ``False`` = invalid. See
+        :meth:`get_action_mask` for the rationale and intended usage.
+
+        Not batched — use :meth:`get_backward_action_mask_batch` for batches.
+        """
         raise NotImplementedError
 
     # ------------------------------------------------------------------
@@ -183,17 +210,17 @@ class BaseEnvironment(ABC, Generic[TEnvState, TEnvParams]):
     # Use these in loss functions where states have a leading batch dim.
     # ------------------------------------------------------------------
 
-    def get_invalid_mask_batch(
+    def get_action_mask_batch(
         self, state: TEnvState, env_params: TEnvParams
     ) -> Bool[Array, "batch_size n_actions"]:
-        """Batched get_invalid_mask for use in loss functions. state: [B, ...]"""
-        return jax.vmap(self.get_invalid_mask, in_axes=(0, None))(state, env_params)
+        """Batched :meth:`get_action_mask` for use in loss functions. state: [B, ...]."""
+        return jax.vmap(self.get_action_mask, in_axes=(0, None))(state, env_params)
 
-    def get_invalid_backward_mask_batch(
+    def get_backward_action_mask_batch(
         self, state: TEnvState, env_params: TEnvParams
     ) -> Bool[Array, "batch_size n_bwd_actions"]:
-        """Batched get_invalid_backward_mask for use in loss functions. state: [B, ...]"""
-        return jax.vmap(self.get_invalid_backward_mask, in_axes=(0, None))(state, env_params)
+        """Batched :meth:`get_backward_action_mask` for use in loss functions. state: [B, ...]."""
+        return jax.vmap(self.get_backward_action_mask, in_axes=(0, None))(state, env_params)
 
     def get_backward_action_batch(
         self,

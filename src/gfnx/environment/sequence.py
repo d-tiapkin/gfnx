@@ -119,10 +119,10 @@ class SequenceEnvironment(BaseEnvironment[EnvState, EnvParams]):
     ) -> chex.Array:
         raise NotImplementedError
 
-    def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+    def get_action_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
         raise NotImplementedError
 
-    def get_invalid_backward_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+    def get_backward_action_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
         raise NotImplementedError
 
     @property
@@ -233,11 +233,11 @@ class FixedAutoregressiveSequenceEnvironment(SequenceEnvironment):
         action = state.tokens[last_position - 1]
         return jnp.clip(action, min=0, max=self.action_space.n - 1)
 
-    def get_invalid_mask(self, _state: EnvState, _env_params: EnvParams) -> chex.Array:
-        return jnp.zeros((self.nchar,), dtype=jnp.bool)
+    def get_action_mask(self, _state: EnvState, _env_params: EnvParams) -> chex.Array:
+        return jnp.ones((self.nchar,), dtype=jnp.bool)
 
-    def get_invalid_backward_mask(self, _state: EnvState, _env_params: EnvParams) -> chex.Array:
-        return jnp.zeros((1,), dtype=jnp.bool)
+    def get_backward_action_mask(self, _state: EnvState, _env_params: EnvParams) -> chex.Array:
+        return jnp.ones((1,), dtype=jnp.bool)
 
     @property
     def action_space(self) -> spaces.Discrete:
@@ -352,11 +352,11 @@ class FixedPrependAppendSequenceEnvironment(SequenceEnvironment):
         action = jnp.where(backward_action == 0, state.tokens[0], self.nchar + removed_token)
         return jnp.clip(action, min=0, max=self.action_space.n - 1)
 
-    def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        return jnp.zeros((2 * self.nchar,), dtype=jnp.bool)
+    def get_action_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        return jnp.ones((2 * self.nchar,), dtype=jnp.bool)
 
-    def get_invalid_backward_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        return jnp.zeros((2,), dtype=jnp.bool)
+    def get_backward_action_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        return jnp.ones((2,), dtype=jnp.bool)
 
     @property
     def action_space(self) -> spaces.Discrete:
@@ -466,11 +466,11 @@ class AutoregressiveSequenceEnvironment(SequenceEnvironment):
         action = all_actions[last_pos - 1]
         return jnp.clip(action, min=0, max=self.action_space.n - 1)
 
-    def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        return jnp.zeros((self.nchar + 1,), dtype=jnp.bool)
+    def get_action_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        return jnp.ones((self.nchar + 1,), dtype=jnp.bool)
 
-    def get_invalid_backward_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        return jnp.zeros((1,), dtype=jnp.bool)
+    def get_backward_action_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        return jnp.ones((1,), dtype=jnp.bool)
 
     @property
     def action_space(self) -> spaces.Discrete:
@@ -556,21 +556,32 @@ class NonAutoregressiveSequenceEnvironment(SequenceEnvironment):
             (backward_action, word), (self.max_length, self.nchar), mode="clip"
         )
 
-    def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        """Return mask of invalid actions (single state). [max_length * nchar]"""
-        pos_mask = state.tokens != self.pad_token  # [max_length]
-        chex.assert_shape(pos_mask, (self.max_length,))
-        invalid_mask_2d = jnp.repeat(jnp.expand_dims(pos_mask, axis=1), repeats=self.nchar, axis=1)
-        chex.assert_shape(invalid_mask_2d, (self.max_length, self.nchar))
-        invalid_mask_flat = invalid_mask_2d.reshape(-1)
-        # If all positions are already filled (all True), return all-zeros mask
-        all_filled = jnp.all(pos_mask)
-        return jnp.where(all_filled, jnp.zeros_like(invalid_mask_flat), invalid_mask_flat)
+    def get_action_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        """Return the mask of valid actions (single state). [max_length * nchar].
 
-    def get_invalid_backward_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        pos_mask = state.tokens == self.pad_token  # [max_length]
-        all_filled = jnp.all(pos_mask)
-        return jnp.where(all_filled, jnp.zeros_like(pos_mask), pos_mask)
+        An action ``(pos, char)`` is valid iff ``pos`` is not yet filled.
+        Falls back to all-True at terminal states so softmax remains finite.
+        """
+        valid_pos_mask = state.tokens == self.pad_token  # [max_length]
+        chex.assert_shape(valid_pos_mask, (self.max_length,))
+        action_mask_2d = jnp.repeat(
+            jnp.expand_dims(valid_pos_mask, axis=1), repeats=self.nchar, axis=1
+        )
+        chex.assert_shape(action_mask_2d, (self.max_length, self.nchar))
+        action_mask_flat = action_mask_2d.reshape(-1)
+        # Terminal: all positions filled → no action is valid; fall back to all-True.
+        all_filled = jnp.all(state.tokens != self.pad_token)
+        return jnp.where(all_filled, jnp.ones_like(action_mask_flat), action_mask_flat)
+
+    def get_backward_action_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        """Return the mask of valid backward actions (single state). [max_length].
+
+        A backward action (remove the token at ``pos``) is valid iff ``pos`` is
+        currently filled. Falls back to all-True at the initial state.
+        """
+        valid_pos_mask = state.tokens != self.pad_token  # [max_length]
+        all_empty = jnp.all(state.tokens == self.pad_token)
+        return jnp.where(all_empty, jnp.ones_like(valid_pos_mask), valid_pos_mask)
 
     @property
     def action_space(self) -> spaces.Discrete:

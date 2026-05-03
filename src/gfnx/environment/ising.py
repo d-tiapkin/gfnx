@@ -137,23 +137,23 @@ class IsingEnvironment(BaseEnvironment[EnvState, EnvParams]):
         """Returns forward action given the backward transition (single)."""
         return backward_action + self.dim * state.state[backward_action].astype(jnp.int32)
 
-    def get_invalid_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        """Returns mask of invalid forward actions for a single state. [2*dim].
+    def get_action_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        """Returns the mask of valid forward actions for a single state. [2*dim].
 
-        An action is invalid if there is already a spin (0 or 1) at the index
-        of the action. The mask is a concatenation of two masks:
-        - mask for invalid forward actions for 0-spin
-        - mask for invalid forward actions for 1-spin (identical to 0-spin)
+        ``True`` = valid action (cell is empty), ``False`` = invalid (cell
+        already has a spin). The mask is the concatenation of two identical
+        sub-masks (one per spin value).
         """
-        mask = state.state != -1
+        mask = state.state == -1
         return jnp.concatenate([mask, mask], axis=-1)
 
-    def get_invalid_backward_mask(self, state: EnvState, params: EnvParams) -> chex.Array:
-        """Returns mask of invalid backward actions for a single state. [dim].
+    def get_backward_action_mask(self, state: EnvState, params: EnvParams) -> chex.Array:
+        """Returns the mask of valid backward actions for a single state. [dim].
 
-        An action is invalid if there is no spin at the index of the action.
+        ``True`` = valid backward action (a spin is set at this index),
+        ``False`` = invalid (cell is empty).
         """
-        return state.state == -1
+        return state.state != -1
 
     @property
     def name(self) -> str:

@@ -282,14 +282,19 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
         right = state.to_leaf[state.right_child[state.to_root[backward_action]]]
         return left * (2 * self.num_nodes - 1 - left) // 2 + right - (left + 1)
 
-    def get_invalid_mask(self, state: EnvState, _env_params: EnvParams) -> chex.Array:
-        return (state.to_root == -1)[self.lefts] | (state.to_root == -1)[self.rights]
+    def get_action_mask(self, state: EnvState, _env_params: EnvParams) -> chex.Array:
+        """Valid forward actions (single state). ``True`` = valid merge."""
+        return (state.to_root != -1)[self.lefts] & (state.to_root != -1)[self.rights]
 
-    def get_invalid_backward_mask(self, state: EnvState, _env_params: EnvParams) -> chex.Array:
-        return jnp.logical_or(
-            state.to_root[:-1] == -1,
-            state.to_root[:-1] == jnp.arange(self.num_nodes - 1),
-        ) # last node is never a root
+    def get_backward_action_mask(self, state: EnvState, _env_params: EnvParams) -> chex.Array:
+        """Valid backward actions (single state). ``True`` = valid undo-merge.
+
+        The last node is never a root, so its slot is always invalid.
+        """
+        return jnp.logical_and(
+            state.to_root[:-1] != -1,
+            state.to_root[:-1] != jnp.arange(self.num_nodes - 1),
+        )
 
     @property
     def max_steps_in_episode(self) -> int:

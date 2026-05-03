@@ -300,29 +300,29 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         policy_outputs = jax.vmap(model)(transitions.obs)
         # Compute the forward log-probs
         fwd_logits = policy_outputs["forward_logits"]
-        invalid_mask = env.get_invalid_mask_batch(transitions.state, env_params)
+        action_mask = env.get_action_mask_batch(transitions.state, env_params)
         fwd_logprobs = gfnx.utils.compute_action_log_probs(
-            fwd_logits, transitions.action, invalid_mask
+            fwd_logits, transitions.action, action_mask
         )
         log_flow = policy_outputs["log_flow"]
 
         # Use the target network for next state
         next_policy_outputs = jax.vmap(train_state.target_model)(transitions.next_obs)
         bwd_logits = next_policy_outputs["backward_logits"]
-        next_bwd_invalid_mask = env.get_invalid_backward_mask_batch(
+        next_backward_action_mask = env.get_backward_action_mask_batch(
             transitions.next_state, env_params
         )
         bwd_logprobs = gfnx.utils.compute_action_log_probs(
-            bwd_logits, bwd_actions, next_bwd_invalid_mask
+            bwd_logits, bwd_actions, next_backward_action_mask
         )
         next_log_flow = next_policy_outputs["log_flow"]
         # In forward-looking DB, the flow is zero for the terminal state
         next_log_flow = jnp.where(transitions.done, 0.0, next_log_flow)
         target = jax.lax.stop_gradient(bwd_logprobs + next_log_flow + delta_score)
-        num_transition = jnp.logical_not(transitions.pad).sum()
+        num_transition = transitions.valid.sum()
         loss = optax.huber_loss(
-            jnp.where(transitions.pad, 0.0, fwd_logprobs + log_flow),
-            jnp.where(transitions.pad, 0.0, target),
+            jnp.where(transitions.valid, fwd_logprobs + log_flow, 0.0),
+            jnp.where(transitions.valid, target, 0.0),
         ).sum()
         return loss / num_transition
 

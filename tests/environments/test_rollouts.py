@@ -166,7 +166,7 @@ class TestRollouts:
         chex.assert_tree_shape_prefix(traj_data.state, (num_envs, env.max_steps_in_episode + 1))
         chex.assert_shape(traj_data.action, (num_envs, env.max_steps_in_episode + 1))
         chex.assert_shape(traj_data.done, (num_envs, env.max_steps_in_episode + 1))
-        chex.assert_shape(traj_data.pad, (num_envs, env.max_steps_in_episode + 1))
+        chex.assert_shape(traj_data.valid, (num_envs, env.max_steps_in_episode + 1))
         chex.block_until_chexify_assertions_complete()
 
     def test_backward_rollout_shape(self, setup_forward_rollout: dict[str, Any]):
@@ -197,7 +197,7 @@ class TestRollouts:
         chex.assert_tree_shape_prefix(traj_data.state, (num_envs, env.max_steps_in_episode + 1))
         chex.assert_shape(traj_data.action, (num_envs, env.max_steps_in_episode + 1))
         chex.assert_shape(traj_data.done, (num_envs, env.max_steps_in_episode + 1))
-        chex.assert_shape(traj_data.pad, (num_envs, env.max_steps_in_episode + 1))
+        chex.assert_shape(traj_data.valid, (num_envs, env.max_steps_in_episode + 1))
         chex.block_until_chexify_assertions_complete()
 
     def test_forward_rollout_validity(self, setup_forward_rollout: dict[str, Any]):
@@ -271,18 +271,18 @@ class TestRollouts:
         fwd_traj_data = setup_forward_rollout["traj_data"]
 
         def consistency_check(t, carry):
-            traj_data, mask_cond, consistency_cond = carry
+            traj_data, all_valid, consistency_cond = carry
             state = jax.tree.map(lambda x: x[:, t], traj_data.state)
             action = traj_data.action[:, t]
             next_state = jax.tree.map(lambda x: x[:, t + 1], traj_data.state)
-            invalid_mask = env.get_invalid_backward_mask_batch(next_state, env_params)
+            action_mask = env.get_backward_action_mask_batch(next_state, env_params)
             bwd_action = env.get_backward_action_batch(state, action, next_state, env_params)
-            # Check that backward action is valid
-            mask_check = invalid_mask[jnp.arange(num_envs), bwd_action]
-            mask_cond |= jax.lax.select(
+            # Check that the inferred backward action is valid (mask = True).
+            valid_check = action_mask[jnp.arange(num_envs), bwd_action]
+            all_valid &= jax.lax.select(
                 next_state.is_pad,
-                jnp.zeros_like(mask_check, dtype=jnp.bool_),
-                mask_check,
+                jnp.ones_like(valid_check, dtype=jnp.bool_),
+                valid_check,
             )
 
             _, cur_state, _, _ = jax.vmap(env.backward_step, in_axes=(0, 0, None))(
@@ -303,20 +303,20 @@ class TestRollouts:
                 reduced_to_bool,
             )
 
-            return traj_data, mask_cond, consistency_cond
+            return traj_data, all_valid, consistency_cond
 
-        mask_cond = jnp.zeros(num_envs, dtype=jnp.bool_)
+        all_valid = jnp.ones(num_envs, dtype=jnp.bool_)
         consistency_cond = jnp.ones(num_envs, dtype=jnp.bool_)
         jax.lax.fori_loop(
             0,
             env.max_steps_in_episode,
             consistency_check,
-            (fwd_traj_data, mask_cond, consistency_cond),
+            (fwd_traj_data, all_valid, consistency_cond),
         )
         jax.effects_barrier()
         chex.assert_trees_all_equal(
-            mask_cond,
-            jnp.zeros_like(mask_cond, dtype=jnp.bool),
+            all_valid,
+            jnp.ones_like(all_valid, dtype=jnp.bool),
         )
         chex.assert_trees_all_equal(
             consistency_cond,
