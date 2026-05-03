@@ -218,7 +218,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             traj_data.state, env_params
         )
         log_probs_traj = gfnx.utils.compute_action_log_probs(
-            logits_traj, traj_data.action, action_mask_traj, traj_data.step_mask
+            logits_traj, traj_data.action, action_mask_traj, traj_data.valid
         )
         return log_probs_traj.sum(axis=1)  # (num_envs,)
 
@@ -252,7 +252,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             prev_or_next_state, env_params
         )
         reverse_log_probs_traj = gfnx.utils.compute_action_log_probs(
-            reverse_logits_traj, reverse_action_traj, action_mask_traj, traj_data.step_mask[:, :-1]
+            reverse_logits_traj, reverse_action_traj, action_mask_traj, traj_data.valid[:, :-1]
         )
         return reverse_log_probs_traj.sum(axis=1)  # (num_envs,)
 

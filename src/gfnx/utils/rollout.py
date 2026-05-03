@@ -26,15 +26,15 @@ class TrajectoryData:
     state: TEnvState  # [T+1 x ...]
     action: TAction | TBackwardAction  # [T+1]
     done: Bool[Array, " time"]
-    pad: Bool[Array, " time"]
+    pad: Bool[Array, " time"]  # ``True`` = padding step.
     info: dict  # [T+1 x ...]
 
     @property
-    def step_mask(self) -> Bool[Array, " time"]:
+    def valid(self) -> Bool[Array, " time"]:
         """Boolean mask over the time axis: ``True`` for real (non-padding) steps.
 
-        Equivalent to ``jnp.logical_not(self.pad)``. Use directly with
-        ``masked_sum`` / ``masked_mean`` and JAX ops that accept ``where=``.
+        Complement of :attr:`pad`; provided for direct use with ``masked_sum``
+        / ``masked_mean`` and JAX ops that accept ``where=`` (``True`` = include).
         """
         return jnp.logical_not(self.pad)
 
@@ -47,14 +47,14 @@ class TransitionData:
     next_obs: TObs  # [T x ...]
     next_state: TEnvState  # [T x ...]
     done: Bool[Array, " transitions"]
-    pad: Bool[Array, " transitions"]
+    pad: Bool[Array, " transitions"]  # ``True`` = padding transition.
 
     @property
-    def step_mask(self) -> Bool[Array, " transitions"]:
+    def valid(self) -> Bool[Array, " transitions"]:
         """Boolean mask over the time axis: ``True`` for real (non-padding) transitions.
 
-        Equivalent to ``jnp.logical_not(self.pad)``. Use directly with
-        ``masked_sum`` / ``masked_mean`` and JAX ops that accept ``where=``.
+        Complement of :attr:`pad`; provided for direct use with ``masked_sum``
+        / ``masked_mean`` and JAX ops that accept ``where=`` (``True`` = include).
         """
         return jnp.logical_not(self.pad)
 
@@ -245,9 +245,9 @@ def _generic_rollout(
     # traj_data shape: [T+1, ...] — scan is time-major, no batch dim for single env
     chex.assert_tree_shape_prefix(traj_data, (env.max_steps_in_episode + 1,))
     final_state = final_traj_state.env_state
-    step_mask = traj_data.step_mask
-    traj_entropy = masked_sum(traj_data.info["entropy"], step_mask)
-    trajectory_length = jnp.sum(step_mask.astype(jnp.int32))
+    valid = traj_data.valid
+    traj_entropy = masked_sum(traj_data.info["entropy"], valid)
+    trajectory_length = jnp.sum(valid.astype(jnp.int32))
 
     return (
         traj_data,
@@ -278,7 +278,7 @@ def split_traj_to_transitions(traj_data: TrajectoryData) -> TransitionData:
             - next_obs: Next observations.
             - next_state: Next states.
             - done: Done flags.
-            - pad: Padding masks.
+            - pad: Padding masks (``True`` = padding step).
 
         Use `jax.vmap(split_traj_to_transitions)(batched_traj)` for batched
         trajectories.
@@ -336,7 +336,7 @@ def _compute_trajectory_log_probs(
         bwd_action_mask = env.get_backward_action_mask_batch(states, env_params)
         fwd_action_mask = env.get_action_mask_batch(prev_states, env_params)
 
-    step_mask = traj_data.step_mask[:-1]
+    valid = traj_data.valid[:-1]
     sampled_forward_logprobs = compute_action_log_probs(
         forward_logits, fwd_actions, fwd_action_mask
     )
@@ -344,8 +344,8 @@ def _compute_trajectory_log_probs(
         backward_logits, bwd_actions, bwd_action_mask
     )
 
-    log_pf_traj = masked_sum(sampled_forward_logprobs, step_mask)
-    log_pb_traj = masked_sum(sampled_backward_logprobs, step_mask)
+    log_pf_traj = masked_sum(sampled_forward_logprobs, valid)
+    log_pb_traj = masked_sum(sampled_backward_logprobs, valid)
     return log_pf_traj, log_pb_traj
 
 

@@ -200,17 +200,17 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         )
 
         # Compute the DB loss with masking (split between leaf/non-leaf transitions).
-        step_mask = transitions.step_mask
+        valid = transitions.valid
         done = transitions.done
         not_done = jnp.logical_not(transitions.done)
 
         loss = optax.l2_loss(
-            jnp.where(step_mask, fwd_logprobs + log_flow, 0.0),
-            jnp.where(step_mask, target, 0.0),
+            jnp.where(valid, fwd_logprobs + log_flow, 0.0),
+            jnp.where(valid, target, 0.0),
         )
 
-        leaf_loss = gfnx.utils.masked_mean(loss, jnp.logical_and(step_mask, done))
-        flow_loss = gfnx.utils.masked_mean(loss, jnp.logical_and(step_mask, not_done))
+        leaf_loss = gfnx.utils.masked_mean(loss, jnp.logical_and(valid, done))
+        flow_loss = gfnx.utils.masked_mean(loss, jnp.logical_and(valid, not_done))
 
         return leaf_loss * 25 + flow_loss
 

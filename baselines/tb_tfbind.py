@@ -205,7 +205,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         )
 
         fwd_logprobs_traj = gfnx.utils.compute_action_log_probs(
-            fwd_logits_traj, current_traj_data.action, action_mask, current_traj_data.step_mask
+            fwd_logits_traj, current_traj_data.action, action_mask, current_traj_data.valid
         )
         sum_log_pf_along_traj = fwd_logprobs_traj.sum(axis=1)
         # Use extracted logZ_val
@@ -230,7 +230,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         )(curr_states, current_env_params)
 
         log_pb_selected = gfnx.utils.compute_action_log_probs(
-            bwd_logits_for_pb, bwd_actions_traj, backward_action_mask, current_traj_data.step_mask[:, :-1]
+            bwd_logits_for_pb, bwd_actions_traj, backward_action_mask, current_traj_data.valid[:, :-1]
         )
         log_pb_sum = jnp.sum(log_pb_selected, axis=1)
         target = log_pb_sum + current_log_rewards

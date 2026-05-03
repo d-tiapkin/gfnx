@@ -197,11 +197,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         )
 
         # Compute the DB loss with masking (zero out padding transitions).
-        step_mask = transitions.step_mask
-        num_transition = step_mask.sum()
+        valid = transitions.valid
+        num_transition = valid.sum()
         loss = optax.l2_loss(
-            jnp.where(step_mask, fwd_logprobs + log_flow, 0.0),
-            jnp.where(step_mask, target, 0.0),
+            jnp.where(valid, fwd_logprobs + log_flow, 0.0),
+            jnp.where(valid, target, 0.0),
         ).sum()
         return loss / num_transition
 

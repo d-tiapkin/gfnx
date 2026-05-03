@@ -244,7 +244,7 @@ def run_experiment(cfg: OmegaConf) -> None:
                 current_traj_data.state, env_params
             )
             fwd_logprobs = gfnx.utils.compute_action_log_probs(
-                fwd_logits_traj, current_traj_data.action, action_mask, current_traj_data.step_mask
+                fwd_logits_traj, current_traj_data.action, action_mask, current_traj_data.valid
             )
             log_pf_traj = logZ_val + fwd_logprobs.sum(axis=1)
 
@@ -263,7 +263,7 @@ def run_experiment(cfg: OmegaConf) -> None:
                 bwd_logits_traj[:, 1:],
                 bwd_actions_traj,
                 backward_action_mask,
-                current_traj_data.step_mask[:, :-1],
+                current_traj_data.valid[:, :-1],
             )
             log_pb_sum = log_pb_selected.sum(axis=1)
             target = log_pb_sum + current_log_rewards

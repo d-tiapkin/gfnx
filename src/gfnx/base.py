@@ -30,12 +30,14 @@ class BaseEnvState:
     is_pad: Bool[Array, ""]
 
     @property
-    def step_mask(self) -> Bool[Array, ""]:
-        """Boolean mask: ``True`` for a real (non-padding) step.
+    def is_valid(self) -> Bool[Array, ""]:
+        """Whether the state corresponds to a real (non-padding) step.
 
-        Equivalent to ``jnp.logical_not(self.is_pad)``. Use directly with
-        ``masked_sum`` / ``masked_mean`` and JAX ops that accept ``where=`` —
-        all of these treat ``True`` as "include this entry".
+        Convention: ``True`` for a real step, ``False`` for padding (the
+        complement of :attr:`is_pad`, exposed for the ``True = include``
+        masking convention used throughout the library). Pass directly to
+        ``masked_sum`` / ``masked_mean`` or as ``where=`` to JAX reductions;
+        no negation needed.
         """
         return jnp.logical_not(self.is_pad)
 

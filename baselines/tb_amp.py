@@ -210,7 +210,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             fwd_logits_traj,
             current_traj_data.action,
             action_mask_batch_time_actions,
-            current_traj_data.step_mask,
+            current_traj_data.valid,
         )
         sum_log_pf_along_traj = fwd_logprobs_traj.sum(axis=1)
         log_pf_traj = logZ_val + sum_log_pf_along_traj  # Use extracted logZ_val
@@ -260,7 +260,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             bwd_logits_for_pb,
             bwd_actions_traj,
             backward_action_mask_batch_time_actions,
-            current_traj_data.step_mask[:, :-1],
+            current_traj_data.valid[:, :-1],
         )
         log_pb_sum = jnp.sum(log_pb_selected, axis=1)
         target = log_pb_sum + current_log_rewards

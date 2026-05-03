@@ -166,7 +166,7 @@ class TestRollouts:
         chex.assert_tree_shape_prefix(traj_data.state, (num_envs, env.max_steps_in_episode + 1))
         chex.assert_shape(traj_data.action, (num_envs, env.max_steps_in_episode + 1))
         chex.assert_shape(traj_data.done, (num_envs, env.max_steps_in_episode + 1))
-        chex.assert_shape(traj_data.step_mask, (num_envs, env.max_steps_in_episode + 1))
+        chex.assert_shape(traj_data.valid, (num_envs, env.max_steps_in_episode + 1))
         chex.block_until_chexify_assertions_complete()
 
     def test_backward_rollout_shape(self, setup_forward_rollout: dict[str, Any]):
@@ -197,7 +197,7 @@ class TestRollouts:
         chex.assert_tree_shape_prefix(traj_data.state, (num_envs, env.max_steps_in_episode + 1))
         chex.assert_shape(traj_data.action, (num_envs, env.max_steps_in_episode + 1))
         chex.assert_shape(traj_data.done, (num_envs, env.max_steps_in_episode + 1))
-        chex.assert_shape(traj_data.step_mask, (num_envs, env.max_steps_in_episode + 1))
+        chex.assert_shape(traj_data.valid, (num_envs, env.max_steps_in_episode + 1))
         chex.block_until_chexify_assertions_complete()
 
     def test_forward_rollout_validity(self, setup_forward_rollout: dict[str, Any]):
@@ -219,7 +219,7 @@ class TestRollouts:
 
         # Check that padding follows done states
         done_indices = jnp.argmax(traj_data.done, axis=1)
-        pads = traj_data.step_mask[jnp.arange(num_envs), done_indices + 1]
+        pads = traj_data.pad[jnp.arange(num_envs), done_indices + 1]
         chex.assert_equal(jnp.all(pads), True)
         chex.block_until_chexify_assertions_complete()
 
@@ -249,7 +249,7 @@ class TestRollouts:
 
         # Check that all trajectories end with a pad
         chex.assert_equal(
-            jnp.all(traj_data.step_mask[jnp.arange(num_envs), done_indices + 1]),
+            jnp.all(traj_data.pad[jnp.arange(num_envs), done_indices + 1]),
             True,
         )
 

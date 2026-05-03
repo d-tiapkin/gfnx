@@ -209,18 +209,18 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             current_env.get_backward_action_batch,
             in_axes=(0, 0, 0, None),
         )(prev_states, fwd_actions, curr_states, current_env_params)
-        step_mask = current_traj_data.step_mask[:, :-1]
+        valid = current_traj_data.valid[:, :-1]
         pad_mask = current_traj_data.pad[:, :-1]
         done_mask = current_traj_data.done[:, :-1]
 
         # Forward log-probs
         log_pf_along_traj = gfnx.utils.compute_action_log_probs(
-            fwd_logits_traj[:, :-1], forward_action, action_mask[:, :-1], step_mask
+            fwd_logits_traj[:, :-1], forward_action, action_mask[:, :-1], valid
         )
 
         # Backward log-probs
         log_pb_along_traj = gfnx.utils.compute_action_log_probs(
-            bwd_logits_traj[:, 1:], bwd_actions_traj, backward_action_mask[:, 1:], step_mask
+            bwd_logits_traj[:, 1:], bwd_actions_traj, backward_action_mask[:, 1:], valid
         )
 
         # log_flow
@@ -228,7 +228,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             jnp.where(done_mask, current_log_rewards[:, jnp.newaxis], log_flow_traj[:, 1:])
         )
         log_flow_traj = log_flow_traj.at[:, 1:].set(
-            jnp.where(step_mask, log_flow_traj[:, 1:], 0.0)
+            jnp.where(valid, log_flow_traj[:, 1:], 0.0)
         )
 
         def process_one_traj(log_pf, log_pb, log_flow, done, pad):

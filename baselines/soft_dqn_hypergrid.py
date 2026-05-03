@@ -177,7 +177,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
 
     def loss_fn(model, target_model, current_traj_rewards_flat) -> chex.Array:
         num_transition = transitions.pad.shape[0]
-        step_mask = transitions.step_mask
+        valid = transitions.valid
 
         # Step 1. Compute the Q-value
         policy_outputs = jax.vmap(model)(transitions.obs)
@@ -193,7 +193,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         qvalue = jnp.take_along_axis(
             qvalue, jnp.expand_dims(transitions.action, axis=-1), axis=-1
         ).squeeze(-1)
-        padded_q_value = jnp.where(step_mask, qvalue, 0.0)
+        padded_q_value = jnp.where(valid, qvalue, 0.0)
 
         # Step 2.1: Compute the target Q-value
         target_policy_outputs = jax.vmap(target_model)(transitions.next_obs)
@@ -227,14 +227,14 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             current_traj_rewards_flat,
             bwd_logprobs + target_next_value,  # (N,) + (N,) = (N,)
         )
-        padded_target = jnp.where(step_mask, target, 0.0)
+        padded_target = jnp.where(valid, target, 0.0)
 
         # Step 4. Compute the loss
         local_losses = optax.losses.huber_loss(padded_q_value, padded_target)
         local_losses = jnp.where(
             transitions.done, local_losses * train_state.config.agent.leaf_coeff, local_losses
         )
-        return jnp.sum(local_losses * step_mask) / jnp.sum(step_mask)
+        return jnp.sum(local_losses * valid) / jnp.sum(valid)
 
     mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(
         train_state.model, train_state.target_model, traj_rewards_flat

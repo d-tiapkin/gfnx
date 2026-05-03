@@ -264,12 +264,12 @@ def run_experiment(cfg: OmegaConf) -> None:
                 bwd_logprobs + current_traj_rewards_flat,
                 bwd_logprobs + next_log_flow,
             )
-            step_mask = transitions.step_mask
+            valid = transitions.valid
             loss = optax.losses.squared_error(
-                jnp.where(step_mask, fwd_logprobs + log_flow, 0.0),
-                jnp.where(step_mask, target, 0.0),
+                jnp.where(valid, fwd_logprobs + log_flow, 0.0),
+                jnp.where(valid, target, 0.0),
             )
-            return loss.sum() / step_mask.sum()
+            return loss.sum() / valid.sum()
 
         _mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(
             state.model_params, traj_rewards_flat

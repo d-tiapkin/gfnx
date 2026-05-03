@@ -429,7 +429,7 @@ def update_step(
         )
 
         # Compute the MDB loss only over active (non-terminal, non-padding) transitions.
-        active = transitions.step_mask & jnp.logical_not(transitions.done)
+        active = transitions.valid & jnp.logical_not(transitions.done)
         error = next_sink_logprobs + fwd_logprobs - sink_logprobs - bwd_logprobs - delta_score
         error = jnp.where(active, error, 0.0)
         return optax.huber_loss(error).sum() / active.sum()

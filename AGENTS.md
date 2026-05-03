@@ -78,7 +78,7 @@ where F̃_θ(s) = exp(E(s)) · F_θ(s). Used for phylogenetic trees.
 ### `BaseEnvState`
 Chex frozen dataclass. Every concrete state inherits from this and adds domain fields.
 Always has: `is_terminal []`, `is_initial []`, `is_pad []`. The derived
-`step_mask` property (`= ~is_pad`) is provided as a convenience for masking ops
+`is_valid` property (`= ~is_pad`) is provided as a convenience for masking ops
 that follow the library convention `True = include` (see "Mask convention").
 
 ### `BaseEnvParams`
@@ -285,8 +285,9 @@ and the `mask=` argument of `masked_sum` / `masked_mean`.
 
 State/condition fields (`is_pad`, `is_terminal`, `is_initial`, `done`) keep
 their natural "this state IS X" semantics — `True` means "this is a padding /
-terminal / done step". For mask use, prefer the derived `step_mask` property
-(`= ~is_pad`) on `BaseEnvState`, `TrajectoryData`, and `TransitionData`.
+terminal / done step". For mask use, prefer the derived complement property:
+`BaseEnvState.is_valid` (`= ~is_pad`) and `TrajectoryData.valid` /
+`TransitionData.valid` (`= ~pad`).
 
 ### Masking utilities (`src/gfnx/utils/masking.py`)
 
