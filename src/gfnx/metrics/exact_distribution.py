@@ -9,7 +9,7 @@ import jax.numpy as jnp
 from gfnx.utils.distances import jensen_shannon_divergence, kl_divergence, total_variation_distance
 from gfnx.utils.rollout import TPolicyFn
 
-from ..base import TEnvironment, TEnvParams, TEnvState
+from ..base import TEnvironment, TEnvParams, TEnvState, TRewardModule
 from ..utils.rollout import TPolicyParams
 from .base import (
     BaseInitArgs,
@@ -92,7 +92,7 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
         metrics: list[str],
         env: TEnvironment,
         fwd_policy_fn: TPolicyFn,
-        reward_module,
+        reward_module: TRewardModule,
         batch_size: int,
         tol_epsilon: float = 1e-7,
     ):
