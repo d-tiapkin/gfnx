@@ -93,11 +93,14 @@ Next we recreate the `run_experiment` setup from `baselines/db_hypergrid.py`. Th
 
 ```python
 reward_module = gfnx.EasyHypergridRewardModule()
+rng_key, reward_init_key = jax.random.split(rng_key)
+reward_params = reward_module.init(reward_init_key)  # trivial for Hypergrid; non-trivial for learned rewards
+
 env = gfnx.environment.HypergridEnvironment(
     reward_module, dim=cfg.environment.dim, side=cfg.environment.side
 )
-env_init_key = jax.random.PRNGKey(cfg.env_seed)
-env_params = env.init(env_init_key)  # dummy for Hypergrid, non-trivial elsewhere
+rng_key, env_init_key = jax.random.split(rng_key)
+env_params = env.init(env_init_key)
 ```
 
 ### 2.2 Policy network
@@ -163,7 +166,16 @@ class TrainState(NamedTuple):
     metrics_state: ApproxDistributionMetricsState
     exploration_schedule: optax.Schedule
     eval_info: dict
+```
 
+`TrainState` serves as the single carrier of all training state. Its fields fall into two categories that matter for JIT compilation:
+
+- **Static** (non-array Python objects — live in the JIT closure, never traced): `config`, `env`, `model`, `optimizer`, `metrics_module`, `exploration_schedule`
+- **Dynamic** (JAX arrays — threaded through `fori_loop` as traced values): `rng_key`, `env_params`, `opt_state`, `metrics_state`, `eval_info`
+
+`eqx.partition(train_state, eqx.is_array)` splits the state along this boundary automatically; `eqx.combine` reconstructs the full object inside each training step. You will see this in section 2.6.
+
+```python
 train_state = TrainState(
     rng_key=rng_key,
     config=cfg,
