@@ -102,11 +102,12 @@ reward_module = gfnx.EasyHypergridRewardModule(side=cfg.environment.side)
 env = gfnx.environment.HypergridEnvironment(
     dim=cfg.environment.dim, side=cfg.environment.side
 )
-env_init_key = jax.random.PRNGKey(cfg.env_init_seed)
+rng_key, env_init_key = jax.random.split(rng_key)
 env_params = env.init(env_init_key)
 
-# Initialise reward parameters from a dummy state — all reward modules share this contract.
-reward_params = reward_module.init(env_init_key, env.reset())
+# Use a separate key for reward init — reward and env may have independent stochastic state.
+rng_key, reward_init_key = jax.random.split(rng_key)
+reward_params = reward_module.init(reward_init_key, env.reset())
 ```
 
 ### 2.2 Policy network
@@ -160,7 +161,12 @@ eval_info = metrics_module.get(metrics_state)
 
 ### 2.5 Combine everything into `TrainState`
 
-`reward_module` is static (a Python object — captured by Equinox's static partition) while `reward_params` is a dynamic JAX array tree:
+`TrainState` bundles all training state into a single object so it can be threaded through `jax.jit` and `jax.lax.fori_loop`. Its fields split into two categories:
+
+- **Static** (non-array Python objects — captured in the JIT closure via `eqx.partition`, never traced): `config`, `env`, `reward_module`, `model`, `optimizer`, `metrics_module`, `exploration_schedule`
+- **Dynamic** (JAX array trees — threaded through `fori_loop` as traced values): `rng_key`, `env_params`, `reward_params`, `opt_state`, `metrics_state`, `eval_info`
+
+`eqx.partition(train_state, eqx.is_array)` performs this split automatically; `eqx.combine` reconstructs the full object at the start of each training step (see section 2.6).
 
 ```python
 class TrainState(NamedTuple):
