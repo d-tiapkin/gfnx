@@ -24,10 +24,16 @@ $$
 
 - `env`: Environment for which metric is computed.
 - `env_params`: Environment parameters used for trajectory generation.
-- `bwd_policy_fn`: Backward policy function for generating trajectories starting from terminal states.
+- `reward_module` / `reward_params`: Reward used to (a) sample the fixed test set
+  via `env.get_ground_truth_sampling` at construction time and (b) cache `log Z`
+  when tractable. The current `reward_params` must also be supplied via
+  `ProcessArgs` for every evaluation.
+- `bwd_policy_fn`: Backward policy function for generating trajectories
+  starting from terminal states. Operates on a **single** observation (no batch
+  dim).
 - `n_rounds`: Number of sampling rounds for statistical stability.
 - `batch_size`: Batch size used when evaluating policy over states.
-- `rng_key`: Key used for pseudo random.
+- `rng_key`: Key used for sampling the fixed test set at construction time.
 
 ## Quick start
 
@@ -38,8 +44,10 @@ import jax
 import jax.numpy as jnp
 import gfnx
 
-env = gfnx.HypergridEnvironment(reward_module=gfnx.EasyHypergridRewardModule())
-params = env.init(jax.random.PRNGKey(0))
+reward_module = gfnx.EasyHypergridRewardModule(side=20)
+env = gfnx.HypergridEnvironment()
+env_params = env.init(jax.random.PRNGKey(0))
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
 policy_params = {
     "forward_num_actions": env.action_space.n,
@@ -48,16 +56,17 @@ policy_params = {
 
 
 def uniform_backward_policy(rng_key, obs, policy_params):
-    batch = obs.shape[0]
-    backward_logits = jnp.zeros((batch, policy_params["backward_num_actions"]), dtype=jnp.float32)
-    forward_logits = jnp.zeros((batch, policy_params["forward_num_actions"]), dtype=jnp.float32)
+    backward_logits = jnp.zeros((policy_params["backward_num_actions"],), dtype=jnp.float32)
+    forward_logits = jnp.zeros((policy_params["forward_num_actions"],), dtype=jnp.float32)
     info = {"forward_logits": forward_logits, "backward_logits": backward_logits}
     return backward_logits, info
 
 
 metrics = gfnx.metrics.EUBOMetricsModule(
     env=env,
-    env_params=params,
+    env_params=env_params,
+    reward_module=reward_module,
+    reward_params=reward_params,
     bwd_policy_fn=uniform_backward_policy,
     n_rounds=16,
     batch_size=256,
@@ -68,7 +77,11 @@ state = metrics.init(jax.random.PRNGKey(1), metrics.InitArgs())
 state = metrics.process(
     state,
     jax.random.PRNGKey(2),
-    metrics.ProcessArgs(policy_params=policy_params, env_params=params),
+    metrics.ProcessArgs(
+        policy_params=policy_params,
+        env_params=env_params,
+        reward_params=reward_params,
+    ),
 )
 eubo = metrics.get(state)["eubo"]
 print(float(eubo))

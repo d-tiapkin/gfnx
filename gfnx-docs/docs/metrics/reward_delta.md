@@ -48,23 +48,26 @@ Both modules return a dictionary with keys `mean_reward`, `reward_delta`, and
 import jax
 import gfnx
 
+reward_module = gfnx.EasyHypergridRewardModule(side=20)
 env = gfnx.HypergridEnvironment()
-reward_module=gfnx.EasyHypergridRewardModule()
-params = env.init(jax.random.PRNGKey(0))
+env_params = env.init(jax.random.PRNGKey(0))
 reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
 mean_metric = gfnx.metrics.ExpectedRewardMetricsModule(
-  env=env, env_params=params, reward_module=reward_module, reward_params=reward_params
+    env=env,
+    env_params=env_params,
+    reward_module=reward_module,
+    reward_params=reward_params,
 )
 state = mean_metric.init(jax.random.PRNGKey(1), mean_metric.InitArgs())
 
-# During training: accumulate rewards from rollouts (log or linear, your choice).
+# During training: accumulate rewards from rollouts.
+# `UpdateArgs.rewards` accepts whichever scale you collect (log or linear);
+# stay consistent so deltas remain meaningful.
 state = mean_metric.update(
     state,
     jax.random.PRNGKey(2),
-    mean_metric.UpdateArgs(
-        log_rewards=batch_rewards
-    ),  # batch_rewards <- log rewards from your sampler
+    mean_metric.UpdateArgs(rewards=batch_rewards),
 )
 
 scores = mean_metric.get(state)
