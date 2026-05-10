@@ -102,11 +102,11 @@ reward_module = gfnx.EasyHypergridRewardModule(side=cfg.environment.side)
 env = gfnx.environment.HypergridEnvironment(
     dim=cfg.environment.dim, side=cfg.environment.side
 )
-rng_key, env_init_key = jax.random.split(rng_key)
+env_init_key = jax.random.PRNGKey(cfg.env_init_seed)
+env_init_key, reward_init_key = jax.random.split(env_init_key)
 env_params = env.init(env_init_key)
 
 # Use a separate key for reward init — reward and env may have independent stochastic state.
-rng_key, reward_init_key = jax.random.split(rng_key)
 reward_params = reward_module.init(reward_init_key, env.reset())
 ```
 
@@ -119,7 +119,7 @@ model = MLPPolicy(
     n_fwd_actions=env.action_space.n,
     n_bwd_actions=env.backward_action_space.n,
     hidden_size=256,
-    train_backward_policy=cfg.agent.train_backward,
+    train_backward_policy=True,
     depth=3,
     rng_key=net_init_key,
 )
