@@ -1,17 +1,18 @@
 # Walkthrough
 
-This guide dissects the Detailed Balance (DB) baseline for the Hypergrid environment. The complete, runnable script lives in `baselines/db_hypergrid.py`; the sections below emphasize the design choices so you can extend the baseline to new settings.
+This guide dissects the Detailed Balance (DB) baseline for the Hypergrid environment. The complete, runnable script lives in `baselines/db_hypergrid.py`; the sections below emphasize the design choices so you can extend the baseline to new settings. A second, shorter walkthrough at the end of this page covers a *vmapped-over-seeds* baseline (`baselines/tb_hypergrid_multiseed.py`) and shows how to scale the same pattern to many seeds in parallel.
 
 ### What you’ll learn
 
-- How the DB objective is implemented in practice.  
-- How the policy network, optimizer, metrics, and training loop fit together.  
-- How to structure JAX/Eqinox code so it compiles cleanly under `jax.jit`.
+- How the DB objective is implemented in practice.
+- How the policy network, optimizer, metrics, and training loop fit together.
+- How to structure JAX/Equinox code so it compiles cleanly under `jax.jit`.
+- How to vmap the entire training loop over random seeds for free.
 
 ### Before you start
 
-- Install the project with baseline extras: `pip install -e '.[baselines]'`.  
-- Open `baselines/db_hypergrid.py` for the full reference while following this walkthrough.  
+- Install the project with baseline extras: `pip install -e '.[baselines]'`.
+- Open `baselines/db_hypergrid.py` for the full reference while following this walkthrough.
 
 ## Recap: Detailed Balance objective
 
@@ -25,13 +26,13 @@ $$
 \right]^2,
 $$
 
-where terminal $s'$ swap $\mathcal{F}(s'; \theta)$ for the reward $R(s')$ and $\theta$ denotes the policy-network parameters.
+where for terminal $s'$ we swap $\mathcal{F}(s'; \theta)$ for the reward $R(s')$, and $\theta$ denotes the policy-network parameters.
 
 ## Step&nbsp;1 – Policy network
 
-As a first step we need a network that parametrizes (1) the forward policy $P_F$, (2) the log-flow $\log \mathcal{F}$, and (3) optionally the backward policy $P_B$. To keep everything JAX-friendly we rely on [Equinox](https://github.com/patrick-kidger/equinox), which lets us define a module once and treat its parameters as a PyTree throughout the training loop.
+We need a network that parametrizes (1) the forward policy $P_F$, (2) the log-flow $\log \mathcal{F}$, and (3) optionally the backward policy $P_B$. To keep everything JAX-friendly we rely on [Equinox](https://github.com/patrick-kidger/equinox), which lets us define a module once and treat its parameters as a PyTree throughout the training loop.
 
-The module below is exactly what `baselines/db_hypergrid.py` uses; it produces all three heads in one pass so we do not have to juggle multiple networks.
+The module below produces all three heads in a single forward pass and operates on a **single** observation — the rollout / loss code vmaps it externally where needed.
 
 ```python
 class MLPPolicy(eqx.Module):
@@ -91,13 +92,22 @@ Next we recreate the `run_experiment` setup from `baselines/db_hypergrid.py`. Th
 
 ### 2.1 Reward and environment
 
+Environments are **decoupled from rewards**: the env constructor takes no `reward_module`, and reward parameters are produced by a separate `reward_module.init(rng_key, dummy_state)` call. The two halves can then be evolved independently — handy when the reward is large (a lookup table, a proxy network) or trainable (e.g. the Ising J matrix).
+
 ```python
-reward_module = gfnx.EasyHypergridRewardModule()
+# Build the reward module first — hypergrid rewards need `side` to compute coordinates.
+reward_module = gfnx.EasyHypergridRewardModule(side=cfg.environment.side)
+
+# Build the environment with no reward attached.
 env = gfnx.environment.HypergridEnvironment(
-    reward_module, dim=cfg.environment.dim, side=cfg.environment.side
+    dim=cfg.environment.dim, side=cfg.environment.side
 )
-env_init_key = jax.random.PRNGKey(cfg.env_seed)
-env_params = env.init(env_init_key)  # dummy for Hypergrid, non-trivial elsewhere
+env_init_key = jax.random.PRNGKey(cfg.env_init_seed)
+env_init_key, reward_init_key = jax.random.split(env_init_key)
+env_params = env.init(env_init_key)
+
+# Use a separate key for reward init — reward and env may have independent stochastic state.
+reward_params = reward_module.init(reward_init_key, env.reset())
 ```
 
 ### 2.2 Policy network
@@ -131,31 +141,41 @@ opt_state = optimizer.init(eqx.filter(model, eqx.is_array))
 
 ### 2.4 Metrics module
 
+Distribution-based metrics need both the reward module (passed at construction) and the current `reward_params` (passed via `InitArgs`) to compute the ground-truth distribution.
+
 ```python
 metrics_module = ApproxDistributionMetricsModule(
     metrics=["tv", "kl", "2d_marginal_distribution"],
     env=env,
+    reward_module=reward_module,
     buffer_size=200_000,
 )
 eval_init_key = jax.random.PRNGKey(cfg.eval_init_seed)
 eval_init_key, new_eval_init_key = jax.random.split(eval_init_key)
 metrics_state = metrics_module.init(
     new_eval_init_key,
-    metrics_module.InitArgs(env_params=env_params),
+    metrics_module.InitArgs(env_params=env_params, reward_params=reward_params),
 )
 eval_info = metrics_module.get(metrics_state)
 ```
 
-`InitArgs` keeps the initialization signature explicit even when multiple metrics require different inputs; it avoids a tangle of `**kwargs` and makes IDE type checking happier.
-
 ### 2.5 Combine everything into `TrainState`
+
+`TrainState` bundles all training state into a single object so it can be threaded through `jax.jit` and `jax.lax.fori_loop`. Its fields split into two categories:
+
+- **Static** (non-array Python objects — captured in the JIT closure via `eqx.partition`, never traced): `config`, `env`, `reward_module`, `model`, `optimizer`, `metrics_module`, `exploration_schedule`
+- **Dynamic** (JAX array trees — threaded through `fori_loop` as traced values): `rng_key`, `env_params`, `reward_params`, `opt_state`, `metrics_state`, `eval_info`
+
+`eqx.partition(train_state, eqx.is_array)` performs this split automatically; `eqx.combine` reconstructs the full object at the start of each training step (see section 2.6).
 
 ```python
 class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
     config: OmegaConf
     env: gfnx.HypergridEnvironment
-    env_params: chex.Array
+    env_params: gfnx.HypergridEnvParams
+    reward_module: gfnx.GeneralHypergridRewardModule  # static
+    reward_params: gfnx.HypergridRewardParams        # dynamic
     model: MLPPolicy
     optimizer: optax.GradientTransformation
     opt_state: optax.OptState
@@ -170,6 +190,8 @@ train_state = TrainState(
     config=cfg,
     env=env,
     env_params=env_params,
+    reward_module=reward_module,
+    reward_params=reward_params,
     model=model,
     optimizer=optimizer,
     opt_state=opt_state,
@@ -180,46 +202,38 @@ train_state = TrainState(
 )
 ```
 
-### 2.6 Define the training loop
+### 2.6 Run the training loop
 
-At this point we assume there exists a `train_step` function that takes `(idx, train_state)` and returns an updated `TrainState`. We want to iterate it `cfg.num_train_steps` times using `jax.lax.fori_loop`, but we **cannot** feed the entire `TrainState` directly because it contains non-JIT-friendly objects (modules, configs, callables). `fori_loop` JIT-compiles `body_fun` under the hood, so we first partition the state into JAX arrays and static leftovers:
+Most baselines wrap the standard `eqx.partition` / `jax.lax.fori_loop` / `block_until_ready` boilerplate behind a single helper:
 
 ```python
-train_state_params, train_state_static = eqx.partition(train_state, eqx.is_array)
-
-
-@functools.partial(jax.jit, donate_argnums=(1,))
-def train_step_wrapper(idx: int, state_params):
-    state = eqx.combine(state_params, train_state_static)
-    state = train_step(idx, state)
-    state_params, _ = eqx.partition(state, eqx.is_array)
-    return state_params
-
-
-train_state_params = jax.lax.fori_loop(
-    lower=0,
-    upper=cfg.num_train_steps,
-    body_fun=train_step_wrapper,
-    init_val=train_state_params,
+train_state = gfnx.utils.run_training_loop(
+    train_step,
+    train_state,
+    cfg.num_train_steps,
+    cfg.logging["tqdm_print_rate"],
 )
-train_state_params = jax.block_until_ready(train_state_params)
-train_state = eqx.combine(train_state_params, train_state_static)
 ```
+
+Internally it splits the train state into JIT-friendly arrays (`eqx.partition(..., eqx.is_array)`), runs `train_step` under `jax.lax.fori_loop`, and recombines the static parts on the way out.
 
 ## Step&nbsp;3 – Implement `train_step`
 
-Before diving into the per-step logic we pull out the components we need:
+`train_step` is decorated with `@eqx.filter_jit`, so the entire body — rollouts, loss, gradient update, metrics — compiles into one XLA program. Pull out the components we'll reuse:
 
 ```python
-num_envs = 16
-env = train_state.env
-env_params = train_state.env_params
-metrics_module = train_state.metrics_module
+@eqx.filter_jit
+def train_step(idx: int, train_state: TrainState) -> TrainState:
+    rng_key = train_state.rng_key
+    num_envs = 16
+    env = train_state.env
+    env_params = train_state.env_params
+    metrics_module = train_state.metrics_module
 ```
 
 ### 3.1 Generate trajectories
 
-To gather data we reuse `gfnx.utils.forward_rollout`, which generate the `num_envs` parallel trajectories, using a corresponding policy function. Imporantly, it pads trajectories to the maximum possible length and is agnostic to the NN framework. The only requirement is to provide a pure `policy_fn` that emits logits (and auxiliary info) for the current batch of observations.
+`gfnx.utils.forward_rollout` runs **one** environment under a given policy and pads the result to `env.max_steps_in_episode + 1` steps. To collect `num_envs` trajectories in parallel we split the RNG key and `jax.vmap` over the leading axis. Reward is computed *post*-rollout on the terminal states — `TrajectoryData` no longer carries a `log_gfn_reward` field.
 
 ```python
 rng_key, sample_traj_key = jax.random.split(train_state.rng_key)
@@ -227,29 +241,37 @@ policy_params, policy_static = eqx.partition(train_state.model, eqx.is_array)
 cur_epsilon = train_state.exploration_schedule(idx)
 
 
-def fwd_policy_fn(rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params):
+def fwd_policy_fn(rng_key, env_obs, policy_params):
     policy = eqx.combine(policy_params, policy_static)
-    policy_outputs = jax.vmap(policy, in_axes=(0,))(env_obs)
-    do_explore = jax.random.bernoulli(rng_key, cur_epsilon, shape=(env_obs.shape[0],))
-    forward_logits = jnp.where(do_explore[..., jnp.newaxis], 0, policy_outputs["forward_logits"])
+    policy_outputs = policy(env_obs)  # SINGLE obs — no batch dim
+    do_explore = jax.random.bernoulli(rng_key, cur_epsilon)
+    forward_logits = jnp.where(do_explore, 0, policy_outputs["forward_logits"])
     return forward_logits, policy_outputs
 
 
-traj_data, log_info = gfnx.utils.forward_rollout(
-    rng_key=sample_traj_key,
-    num_envs=num_envs,
-    policy_fn=fwd_policy_fn,
-    policy_params=policy_params,
-    env=env,
-    env_params=env_params,
-)
+rng_keys = jax.random.split(sample_traj_key, num_envs)
+traj_data, final_states, info = jax.vmap(
+    lambda rng: gfnx.utils.forward_rollout(
+        rng, fwd_policy_fn, policy_params, env, env_params
+    )
+)(rng_keys)
+
+# Reward is decoupled — compute it on the batch of terminal states.
+log_rewards = jax.vmap(
+    train_state.reward_module.log_reward, in_axes=(0, None)
+)(final_states, train_state.reward_params)  # [B]
 ```
 
-The DB loss works on state transitions, so we split the padded trajectory into single-step samples and compute the matching backward actions:
+The DB loss works on transitions, so we split each trajectory into single-step samples (then flatten the batch and time axes together) and request the matching backward actions. The library's `_batch` helpers come straight from `BaseEnvironment` — no need to vmap manually:
 
 ```python
-transitions = gfnx.utils.split_traj_to_transitions(traj_data)
-bwd_actions = env.get_backward_action(
+transitions = jax.tree.map(
+    lambda x: x.reshape((-1,) + x.shape[2:]),
+    jax.vmap(gfnx.utils.split_traj_to_transitions)(traj_data),
+)  # [B*T, ...]
+T_steps = transitions.done.shape[0] // num_envs
+traj_rewards_flat = jnp.repeat(log_rewards, T_steps)  # [B*T]
+bwd_actions = env.get_backward_action_batch(
     transitions.state,
     transitions.action,
     transitions.next_state,
@@ -257,52 +279,56 @@ bwd_actions = env.get_backward_action(
 )
 ```
 
-For logging, we also estimate the RL/ELBO reward:
+For logging we also estimate the RL/ELBO reward on each trajectory:
 
 ```python
-_, log_pb_traj = gfnx.utils.forward_trajectory_log_probs(env, traj_data, env_params)
-rl_reward = log_pb_traj + log_info["log_gfn_reward"] + log_info["entropy"]
+_, log_pb_traj = jax.vmap(
+    lambda td: gfnx.utils.forward_trajectory_log_probs(env, td, env_params)
+)(traj_data)
+rl_reward = log_pb_traj + log_rewards + info["entropy"]
 ```
 
 ### 3.2 Loss function
 
-We define the DB loss using an Equinox-style closure: the only argument is the model, everything else closes over the current batch. There is no need to JIT the loss separately—it gets traced as part of the surrounding training loop.
+Two helpers from `gfnx.utils` cut the ceremony to one line each:
+
+- `get_action_mask_batch` / `get_backward_action_mask_batch` follow the **`True = valid`** convention — pass them straight to `jax.nn.log_softmax(..., where=mask)`.
+- `gfnx.utils.compute_action_log_probs(logits, actions, action_mask, step_mask=None)` performs masked `log_softmax` + `take_along_axis` + (optional) zero-out of padding steps in one call.
+- `transitions.valid` (= `~transitions.pad`) gives the per-step `True = real step` mask.
 
 ```python
-def loss_fn(model: MLPPolicy) -> chex.Array:
+def loss_fn(model: MLPPolicy, current_traj_rewards_flat: jnp.ndarray) -> chex.Array:
     policy_outputs = jax.vmap(model, in_axes=(0,))(transitions.obs)
     fwd_logits = policy_outputs["forward_logits"]
-    invalid_mask = env.get_invalid_mask(transitions.state, env_params)
-    fwd_all_log_probs = jax.nn.log_softmax(
-        fwd_logits, where=jnp.logical_not(invalid_mask), axis=-1
+    action_mask = env.get_action_mask_batch(transitions.state, env_params)
+    fwd_logprobs = gfnx.utils.compute_action_log_probs(
+        fwd_logits, transitions.action, action_mask
     )
-    fwd_logprobs = jnp.take_along_axis(
-        fwd_all_log_probs,
-        jnp.expand_dims(transitions.action, axis=-1),
-        axis=-1,
-    ).squeeze(-1)
     log_flow = policy_outputs["log_flow"]
 
     next_policy_outputs = jax.vmap(model, in_axes=(0,))(transitions.next_obs)
     bwd_logits = next_policy_outputs["backward_logits"]
-    next_bwd_invalid_mask = env.get_invalid_backward_mask(transitions.next_state, env_params)
-    bwd_all_log_probs = jax.nn.log_softmax(
-        bwd_logits, where=jnp.logical_not(next_bwd_invalid_mask), axis=-1
+    next_backward_action_mask = env.get_backward_action_mask_batch(
+        transitions.next_state, env_params
     )
-    bwd_logprobs = jnp.take_along_axis(
-        bwd_all_log_probs, jnp.expand_dims(bwd_actions, axis=-1), axis=-1
-    ).squeeze(-1)
+    bwd_logprobs = gfnx.utils.compute_action_log_probs(
+        bwd_logits, bwd_actions, next_backward_action_mask
+    )
     next_log_flow = next_policy_outputs["log_flow"]
 
+    # Replace the target with log R(s') at terminal transitions.
     target = jnp.where(
         transitions.done,
-        bwd_logprobs + transitions.log_gfn_reward,
+        bwd_logprobs + current_traj_rewards_flat,
         bwd_logprobs + next_log_flow,
     )
-    num_transition = jnp.logical_not(transitions.pad).sum()
+
+    # Masked DB loss: only count real (non-padding) transitions.
+    valid = transitions.valid
+    num_transition = valid.sum()
     loss = optax.l2_loss(
-        jnp.where(transitions.pad, 0.0, fwd_logprobs + log_flow),
-        jnp.where(transitions.pad, 0.0, target),
+        jnp.where(valid, fwd_logprobs + log_flow, 0.0),
+        jnp.where(valid, target, 0.0),
     ).sum()
     return loss / num_transition
 ```
@@ -310,7 +336,9 @@ def loss_fn(model: MLPPolicy) -> chex.Array:
 ### 3.3 Perform the gradient update
 
 ```python
-mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(train_state.model)
+mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(
+    train_state.model, traj_rewards_flat
+)
 updates, opt_state = train_state.optimizer.update(
     grads,
     train_state.opt_state,
@@ -321,41 +349,22 @@ model = eqx.apply_updates(train_state.model, updates)
 
 ### 3.4 Evaluation and logging
 
-The metrics stack has two tiers: `update` (cheap, every step) and `process` (expensive, only on evaluation steps). We first apply the lightweight update using the final states from the rollout:
+`BaseMetricsModule.step(...)` runs the cheap `update` every step and the expensive `process` + `get` only on eval steps (`jax.lax.cond` internally — stays JIT-compatible). On non-eval steps it returns `prev_eval_info` unchanged. This collapses the historical update / `cond(process)` / `cond(get)` boilerplate into a single call:
 
 ```python
-metrics_state = metrics_module.update(
-    train_state.metrics_state,
-    rng_key=jax.random.key(0),  # not used in this module
-    args=metrics_module.UpdateArgs(states=log_info["final_env_state"]),
+metrics_state, eval_info = metrics_module.step(
+    idx=idx,
+    metrics_state=train_state.metrics_state,
+    rng_key=jax.random.key(0),  # not used by ApproxDistribution
+    update_args=metrics_module.UpdateArgs(states=final_states),
+    process_args=metrics_module.ProcessArgs(env_params=env_params),
+    eval_each=train_state.config.logging.eval_each,
+    num_train_steps=train_state.config.num_train_steps,
+    prev_eval_info=train_state.eval_info,
 )
 ```
 
-Then we optionally run the heavy evaluation pass and collect metrics:
-
-```python
-is_eval_step = idx % train_state.config.logging.eval_each == 0
-is_eval_step = is_eval_step | (idx + 1 == train_state.config.num_train_steps)
-
-metrics_state = jax.lax.cond(
-    is_eval_step,
-    lambda kwargs: metrics_module.process(**kwargs),
-    lambda kwargs: kwargs["metrics_state"],
-    {
-        "metrics_state": metrics_state,
-        "rng_key": jax.random.key(0),  # not used here either
-        "args": metrics_module.ProcessArgs(env_params=env_params),
-    },
-)
-eval_info = jax.lax.cond(
-    is_eval_step,
-    lambda state: metrics_module.get(state),
-    lambda state: train_state.eval_info,
-    metrics_state,
-)
-```
-
-To log scalar summaries from inside the JIT we rely on `jax.debug.callback`. Setting `ordered=True` ensures that host-side logging respects device execution order even with asynchronous execution:
+To log scalar summaries from inside the JIT we rely on `jax.debug.callback`. Setting `ordered=True` ensures host-side logging respects device execution order even with asynchronous execution:
 
 ```python
 jax.debug.callback(
@@ -363,10 +372,10 @@ jax.debug.callback(
     idx,
     {
         "mean_loss": mean_loss,
-        "entropy": log_info["entropy"].mean(),
+        "entropy": info["entropy"].mean(),
         "grad_norm": optax.tree_utils.tree_l2_norm(grads),
-        "mean_reward": jnp.exp(log_info["log_gfn_reward"]).mean(),
-        "mean_log_reward": log_info["log_gfn_reward"].mean(),
+        "mean_reward": jnp.exp(log_rewards).mean(),
+        "mean_log_reward": log_rewards.mean(),
         "rl_reward": rl_reward.mean(),
     },
     eval_info,
@@ -377,7 +386,7 @@ jax.debug.callback(
 
 ### 3.5 Final update of the train state
 
-Since `train_step` is written in a functional style, we finish by returning an updated `TrainState`:
+Because `train_step` is functional we finish by returning an updated `TrainState`:
 
 ```python
 return train_state._replace(
@@ -390,3 +399,106 @@ return train_state._replace(
 ```
 
 From here you can add checkpointing, richer loggers, or alternate objectives without changing the core training flow. Refer back to `baselines/db_hypergrid.py` for the exact Hydra configuration and CLI entry point.
+
+## Vmapping training over seeds (proof of concept)
+
+`baselines/tb_hypergrid_multiseed.py` shows how to scale the same pattern to many random seeds *in parallel* by `jax.vmap`-ing the entire training loop. Conceptually nothing changes — same Trajectory Balance loss, same env, same metric — but a few JAX constraints have to be respected. This section highlights what's *new* relative to the single-seed walkthrough; refer to the script for the full code.
+
+### What can't go inside a vmap
+
+- **`jax.debug.callback`** — host-side I/O does not vectorise. The multiseed scripts drop per-step logging entirely and emit a CSV of metric history (mean ± std over seeds) once training finishes.
+- **`jax.lax.cond` for eval gating** — under `vmap` *both* branches execute, which destroys the speed-up. The trick is to schedule evaluations at fixed intervals via a two-level `jax.lax.scan` (outer = `num_evals` epochs, inner = `steps_per_eval` train steps) so the eval branch runs unconditionally.
+- **Replay buffers tied to a single trajectory** — `ApproxDistributionMetricsModule` is fine for single-seed runs but becomes awkward to vmap. The multiseed script swaps to `ExactDistributionMetricsModule`, which evaluates the policy distribution by power iteration on the enumerated state graph — no buffer needed.
+
+### Carry only JAX arrays through `vmap`
+
+Split static and dynamic state explicitly. Static parts (`env`, `reward_module`, `policy_static`, `optimizer`) are captured by closure; dynamic parts live in a `chex.dataclass` that contains *only* JAX arrays:
+
+```python
+@chex.dataclass
+class TrainStateParams:
+    rng_key: chex.PRNGKey
+    model_params: chex.ArrayTree  # eqx.filter(model, eqx.is_array)
+    logZ: chex.Array
+    opt_state: optax.OptState
+    reward_params: gfnx.HypergridRewardParams
+```
+
+A per-seed initializer builds the model, reward params, and optimizer state for one seed; `jax.vmap` then tiles it across all seeds:
+
+```python
+def make_init_params(seed: chex.Array) -> TrainStateParams:
+    rng_key = jax.random.PRNGKey(seed)
+    rng_key, net_key, reward_key = jax.random.split(rng_key, 3)
+    model = MLPPolicy(...)
+    model_params = eqx.filter(model, eqx.is_array)
+    reward_params = reward_module.init(reward_key, env.reset())
+    opt_state = optimizer.init({"model_params": model_params, "logZ": jnp.array(0.0)})
+    return TrainStateParams(
+        rng_key=rng_key,
+        model_params=model_params,
+        logZ=jnp.array(0.0),
+        opt_state=opt_state,
+        reward_params=reward_params,
+    )
+
+
+seeds = jnp.arange(cfg.num_seeds)
+all_init_params = jax.vmap(make_init_params)(seeds)
+```
+
+### Two-level scan: evaluate, then train
+
+The body of one seed's training loop nests two `lax.scan`s. The outer one runs `num_evals` epochs; each epoch first evaluates the metric (always, no `cond`) and then runs `steps_per_eval` training steps via the inner scan:
+
+```python
+def epoch_fn(carry, epoch_idx):
+    state, metrics_state = carry
+
+    # 1. Evaluate.
+    processed = metrics_module.process(
+        metrics_state,
+        jax.random.key(0),
+        metrics_module.ProcessArgs(
+            policy_params=state.model_params, env_params=env_params
+        ),
+    )
+    eval_info = metrics_module.get(processed)
+
+    # 2. Run a chunk of training steps.
+    def inner_step(carry, global_idx):
+        return train_step(global_idx, carry), None
+
+    global_indices = epoch_idx * steps_per_eval + jnp.arange(steps_per_eval)
+    state, _ = jax.lax.scan(inner_step, state, global_indices)
+
+    return (state, metrics_state), eval_info
+```
+
+`epoch_fn` returns the per-epoch `eval_info`; the outer scan collects it into a `[num_evals, ...]` history, and a final post-training evaluation is appended to the history before returning.
+
+### Vmap over seeds, jit the whole thing
+
+```python
+@jax.jit
+def run_all_seeds(all_params, all_metrics):
+    def run_one_seed(params, metrics):
+        final_carry, metric_history = jax.lax.scan(
+            epoch_fn, (params, metrics), jnp.arange(cfg.num_evals)
+        )
+        # Append a final post-training evaluation so the last chunk is covered.
+        ...
+        return metric_history  # dict of [num_evals + 1, ...]
+
+    return jax.vmap(run_one_seed)(all_params, all_metrics)
+
+
+all_histories = jax.block_until_ready(run_all_seeds(all_init_params, all_init_metrics))
+# all_histories: dict[str, Array[num_seeds, num_evals + 1]]
+```
+
+Aggregating mean ± std over the `num_seeds` axis happens *after* `block_until_ready` — purely host-side Python, free of vmap constraints.
+
+### When to use this pattern
+
+The vmapped pattern shines when individual seeds are cheap relative to compile time, when the metric does not require side-effectful logging, and when the environment supports an exact (or otherwise vmap-friendly) evaluation procedure. Production training loops on accelerators happily fit dozens of seeds inside one device, turning a sweep of independent runs into one `block_until_ready`. For everything else the single-seed script in the previous sections remains the right starting point.

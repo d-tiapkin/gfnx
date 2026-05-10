@@ -43,8 +43,8 @@ import jax.numpy as jnp
 import gfnx
 from gfnx.utils.distances import hamming_distance
 
+reward_module = gfnx.EasyHypergridRewardModule(side=20)
 env = gfnx.HypergridEnvironment()
-reward_module = gfnx.EasyHypergridRewardModule()
 env_params = env.init(jax.random.PRNGKey(0))
 reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
@@ -55,9 +55,8 @@ policy_params = {
 
 
 def uniform_forward_policy(rng_key, obs, policy_params):
-    batch = obs.shape[0]
-    forward_logits = jnp.zeros((batch, policy_params["forward_num_actions"]), dtype=jnp.float32)
-    backward_logits = jnp.zeros((batch, policy_params["backward_num_actions"]), dtype=jnp.float32)
+    forward_logits = jnp.zeros((policy_params["forward_num_actions"],), dtype=jnp.float32)
+    backward_logits = jnp.zeros((policy_params["backward_num_actions"],), dtype=jnp.float32)
     info = {"forward_logits": forward_logits, "backward_logits": backward_logits}
     return forward_logits, info
 
@@ -81,9 +80,9 @@ state = metrics.process(
     state,
     jax.random.PRNGKey(2),
     metrics.ProcessArgs(
-      policy_params=policy_params,
-      reward_params=reward_params,
-      env_params=params
+        policy_params=policy_params,
+        reward_params=reward_params,
+        env_params=env_params,
     ),
 )
 report = metrics.get(state)

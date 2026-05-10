@@ -18,15 +18,23 @@ They come in two variants depending on how terminal states distribution is evalu
 
 - `metrics`: List of metric names to compute, choose from `{"tv", "kl", "jsd", "2d_marginal_distribution"}`.
 - `env`: Enumerable environment for which to compute metrics.
+- `reward_module`: Reward module used to obtain the ground-truth distribution.
 - `buffer_size`: Maximum number of states to store in the replay buffer for empirical distribution computation.
+
+`reward_params` are passed at `init` time via `InitArgs(env_params=...,
+reward_params=...)` because they may be large or trainable.
 
 ### Exact (`ExactDistributionMetricsModule`)
 
-- `metrics`: List of metric names to compute, choose from `{"tv", "kl", "2d_marginal_distribution"}`.
+- `metrics`: List of metric names to compute, choose from `{"tv", "kl", "jsd", "2d_marginal_distribution"}`.
 - `env`: Enumerable environment for which to compute metrics.
 - `fwd_policy_fn`: Forward policy function for generating trajectories.
+- `reward_module`: Reward module used to obtain the ground-truth distribution.
 - `batch_size`: Batch size used when evaluating policy over states.
 - `tol_epsilon`: Tolerance for convergence in distribution computation.
+
+`reward_params` are passed at `init` time via `InitArgs(env_params=...,
+reward_params=...)`.
 
 ## Quick start
 
