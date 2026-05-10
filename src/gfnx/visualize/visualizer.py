@@ -2,7 +2,7 @@ import jax
 import matplotlib
 from matplotlib.animation import FuncAnimation
 
-from gfnx.base import BaseEnvParams, BaseEnvState, BaseVecEnvironment
+from gfnx.base import BaseEnvironment, BaseEnvParams, BaseEnvState
 
 from ..utils import TrajectoryData, split_traj_to_transitions
 from .hypergrid import HypergridEnvironment, HypergridRenderer
@@ -38,9 +38,7 @@ class Visualizer:
         >>> visualizer.animate(trajectory, "animation.mp4")
     """
 
-    def __init__(
-        self, env: BaseVecEnvironment, env_params: BaseEnvParams, dpi: float = 200.0
-    ):
+    def __init__(self, env: BaseEnvironment, env_params: BaseEnvParams, dpi: float = 200.0):
         """Initialize the Visualizer with the given environment and parameters.
 
         Args:

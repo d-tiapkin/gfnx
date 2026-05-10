@@ -43,8 +43,10 @@ import jax.numpy as jnp
 import gfnx
 from gfnx.utils.distances import hamming_distance
 
-env = gfnx.HypergridEnvironment(reward_module=gfnx.EasyHypergridRewardModule())
-params = env.init(jax.random.PRNGKey(0))
+reward_module = gfnx.EasyHypergridRewardModule(side=20)
+env = gfnx.HypergridEnvironment()
+env_params = env.init(jax.random.PRNGKey(0))
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
 policy_params = {
     "forward_num_actions": env.action_space.n,
@@ -53,9 +55,8 @@ policy_params = {
 
 
 def uniform_forward_policy(rng_key, obs, policy_params):
-    batch = obs.shape[0]
-    forward_logits = jnp.zeros((batch, policy_params["forward_num_actions"]), dtype=jnp.float32)
-    backward_logits = jnp.zeros((batch, policy_params["backward_num_actions"]), dtype=jnp.float32)
+    forward_logits = jnp.zeros((policy_params["forward_num_actions"],), dtype=jnp.float32)
+    backward_logits = jnp.zeros((policy_params["backward_num_actions"],), dtype=jnp.float32)
     info = {"forward_logits": forward_logits, "backward_logits": backward_logits}
     return forward_logits, info
 
@@ -66,6 +67,7 @@ def grid_hamming(lhs_state, rhs_state):
 
 metrics = gfnx.metrics.TopKMetricsModule(
     env=env,
+    reward_module=reward_module,
     fwd_policy_fn=uniform_forward_policy,
     num_traj=4096,
     batch_size=256,
@@ -77,7 +79,11 @@ state = metrics.init(jax.random.PRNGKey(1), metrics.InitArgs())
 state = metrics.process(
     state,
     jax.random.PRNGKey(2),
-    metrics.ProcessArgs(policy_params=policy_params, env_params=params),
+    metrics.ProcessArgs(
+        policy_params=policy_params,
+        reward_params=reward_params,
+        env_params=env_params,
+    ),
 )
 report = metrics.get(state)
 print(report["top_50_reward"], report["top_50_diversity"])

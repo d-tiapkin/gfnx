@@ -26,12 +26,10 @@ Use it when you want a single object that drives several metrics on the same set
 of trajectories.
 
 ```python
-metrics = gfnx.metrics.MultiMetricsModule(
-    {
-        "elbo": gfnx.metrics.ELBOMetricsModule(...),
-        "tv": gfnx.metrics.ApproxDistributionMetricsModule(...),
-    }
-)
+metrics = gfnx.metrics.MultiMetricsModule({
+    "elbo": gfnx.metrics.ELBOMetricsModule(...),
+    "tv": gfnx.metrics.ApproxDistributionMetricsModule(...),
+})
 state = metrics.init(rng_key, metrics.InitArgs(metrics_args={}))
 state = metrics.update(state, rng_key, metrics.UpdateArgs(metrics_args={}))
 state = metrics.process(state, rng_key, metrics.ProcessArgs(metrics_args={}))

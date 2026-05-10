@@ -6,7 +6,7 @@ num_train_steps: 1000000
 num_envs: 16
 
 agent:
-  learning_rate: 3e-4
+  learning_rate: 5e-4
   start_eps: 0.0
   end_eps: 0.0
   exploration_steps: 50_000 # Should be <= of num_train_steps

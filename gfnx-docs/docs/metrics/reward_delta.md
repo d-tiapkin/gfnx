@@ -2,7 +2,7 @@
 
 The reward-delta metrics track how the empirical mean reward compares to the
 true mean reward of the environment. They are useful whenever the environment
-can provide ground-truth reward expectation (`env.is_mean_reward_tractable = True`).
+can provide ground-truth reward expectation (`env.is_expected_reward_tractable = True`).
 
 ## Intuition
 
@@ -18,9 +18,9 @@ can provide ground-truth reward expectation (`env.is_mean_reward_tractable = Tru
 
 ## Modules
 
-- `MeanRewardMetricsModule`: maintains running sums of collected rewards and
+- `ExpectedRewardMetricsModule`: maintains running sums of collected rewards and
   reports the global mean, absolute delta, and relative delta.
-- `SWMeanRewardSWMetricsModule`: keeps a sliding window of the most recent
+- `SWExpectedRewardMetricsModule`: keeps a sliding window of the most recent
   rewards using a [`flashbax`](https://github.com/instadeepai/flashbax) buffer, offering the same statistics 
   but focused on recent performance.
 
@@ -42,23 +42,32 @@ Both modules return a dictionary with keys `mean_reward`, `reward_delta`, and
 
 ## Quick start
 
-> **Environment requirement:** the environment must expose a tractable ground-truth mean reward (`env.is_mean_reward_tractable = True`) so deltas are meaningful.
+> **Environment requirement:** the environment must expose a tractable ground-truth mean reward (`env.is_expected_reward_tractable = True`) so deltas are meaningful.
 
 ```python
 import jax
 import gfnx
 
-env = gfnx.HypergridEnvironment(reward_module=gfnx.EasyHypergridRewardModule())
-params = env.init(jax.random.PRNGKey(0))
+reward_module = gfnx.EasyHypergridRewardModule(side=20)
+env = gfnx.HypergridEnvironment()
+env_params = env.init(jax.random.PRNGKey(0))
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
-mean_metric = gfnx.metrics.MeanRewardMetricsModule(env=env, env_params=params)
+mean_metric = gfnx.metrics.ExpectedRewardMetricsModule(
+    env=env,
+    env_params=env_params,
+    reward_module=reward_module,
+    reward_params=reward_params,
+)
 state = mean_metric.init(jax.random.PRNGKey(1), mean_metric.InitArgs())
 
-# During training: accumulate rewards from rollouts (log or linear, your choice).
+# During training: accumulate rewards from rollouts.
+# `UpdateArgs.rewards` accepts whichever scale you collect (log or linear);
+# stay consistent so deltas remain meaningful.
 state = mean_metric.update(
     state,
     jax.random.PRNGKey(2),
-    mean_metric.UpdateArgs(log_rewards=batch_rewards),  # batch_rewards <- log rewards from your sampler
+    mean_metric.UpdateArgs(rewards=batch_rewards),
 )
 
 scores = mean_metric.get(state)

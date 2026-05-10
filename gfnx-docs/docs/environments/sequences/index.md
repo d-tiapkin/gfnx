@@ -24,12 +24,16 @@ This task is to generate binary sequences of a fixed length $n$, using a vocabul
 
 ## Quick start
 
+Environments and rewards are decoupled in `gfnx`: build the reward module
+separately, then call `reward_module.init(rng_key, env.reset())` to obtain
+`reward_params`. The environment constructor never takes a reward.
+
 ```python
 import jax
 import jax.numpy as jnp
 import gfnx
 
-# 1. Define the reward.
+# 1. Build the reward.
 reward_module = gfnx.BitseqRewardModule(
     sentence_len=8,
     k=2,
@@ -37,23 +41,26 @@ reward_module = gfnx.BitseqRewardModule(
     reward_exponent=3.0,
 )
 
-# 2. Create the environment.
-env = gfnx.BitseqEnvironment(reward_module, n=8, k=2)
-params = env.init(jax.random.PRNGKey(0))
+# 2. Build the environment.
+env = gfnx.BitseqEnvironment(n=8, k=2)
+env_params = env.init(jax.random.PRNGKey(0))
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
-# 3. Reset to get the initial observation/state batch.
-obs, state = env.reset(num_envs=1, env_params=params)
+# 3. Reset to obtain a single initial state.
+state = env.reset()
 
 # 4. Take a forward step:
-# action / 2^k corresponds to the position with empty word, 
-# action mod 2^k corresponds to the k-bit word to put in its place.
-action = jnp.array([0], dtype=jnp.int32)
-obs, state, log_reward, done, _ = env.step(state, action, params)
+#    action / 2^k corresponds to the position with empty word,
+#    action mod 2^k corresponds to the k-bit word to put in its place.
+action = jnp.int32(0)
+obs, state, done, _ = env.step(state, action, env_params)
+
+# 5. The reward is computed on the terminal state via the reward module.
+log_reward = reward_module.log_reward(state, reward_params)
 ```
 
-The environment is vectorised: set `num_envs > 1` and pass batched actions to
-interact with multiple trajectories in parallel. `log_reward` is only non-zero
-the moment you transition into a terminal state.
+All environment methods operate on a **single** state — wrap them with
+`jax.vmap` to run multiple trajectories in parallel.
 
 
 # TFBind-8 environment
@@ -68,19 +75,20 @@ import jax
 import jax.numpy as jnp
 import gfnx
 
-# 1. Define the reward.
+# 1. Build the reward (a lookup table over all 4^8 sequences).
 reward_module = gfnx.TFBind8RewardModule()
 
-# 2. Create the environment.
-env = gfnx.TFBind8Environment(reward_module)
-params = env.init(jax.random.PRNGKey(0))
+# 2. Build the environment.
+env = gfnx.TFBind8Environment()
+env_params = env.init(jax.random.PRNGKey(0))
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
-# 3. Reset to get the initial observation/state batch.
-obs, state = env.reset(num_envs=1, env_params=params)
+# 3. Reset to a single initial state.
+state = env.reset()
 
 # 4. Take a forward step.
-action = jnp.array([0], dtype=jnp.int32)
-obs, state, log_reward, done, _ = env.step(state, action, params)
+action = jnp.int32(0)
+obs, state, done, _ = env.step(state, action, env_params)
 ```
 
 # QM9 Small environment
@@ -94,19 +102,20 @@ import jax
 import jax.numpy as jnp
 import gfnx
 
-# 1. Define the reward.
+# 1. Build the reward.
 reward_module = gfnx.QM9SmallRewardModule()
 
-# 2. Create the environment.
-env = gfnx.QM9SmallEnvironment(reward_module)
-params = env.init(jax.random.PRNGKey(0))
+# 2. Build the environment.
+env = gfnx.QM9SmallEnvironment()
+env_params = env.init(jax.random.PRNGKey(0))
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
-# 3. Reset to get the initial observation/state batch.
-obs, state = env.reset(num_envs=1, env_params=params)
+# 3. Reset to a single initial state.
+state = env.reset()
 
 # 4. Take a forward step.
-action = jnp.array([0], dtype=jnp.int32)
-obs, state, log_reward, done, _ = env.step(state, action, params)
+action = jnp.int32(0)
+obs, state, done, _ = env.step(state, action, env_params)
 ```
 
 
@@ -130,26 +139,31 @@ import jax
 import jax.numpy as jnp
 import gfnx
 
-# 1. Load the reward model
+# 1. Load the reward model.
 reward_module = gfnx.EqxProxyAMPRewardModule(
     proxy_config_path="proxy/configs/amp.yaml",
     pretrained_proxy_path="proxy/weights/amp/model",
     reward_exponent=1.0,
-    min_reward=1e-6
+    min_reward=1e-6,
 )
 
-# 2. Create an environment and initialize it
-env = gfnx.AMPEnvironment(reward_module)
-# env_params will store the weights of the reward function
+# 2. Create the environment (no reward attached).
+env = gfnx.AMPEnvironment()
 env_params = env.init(jax.random.PRNGKey(0))
 
-# 3. Reset to get the initial observation/state batch.
-obs, state = env.reset(num_envs=1, env_params=env_params)
+# 3. Initialise reward parameters — the proxy model weights live here.
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
-# 4. Take a forward step.
-action = jnp.array([0], dtype=jnp.int32)
-obs, state, log_reward, done, _ = env.step(state, action, env_params)
+# 4. Reset to a single initial state.
+state = env.reset()
+
+# 5. Take a forward step.
+action = jnp.int32(0)
+obs, state, done, _ = env.step(state, action, env_params)
 ```
+
+`reward_params` carries the loaded proxy network weights — `env_params` only
+holds environment dynamics (max length, vocabulary size, etc.).
 
 # GFP environment (experimental)
 
@@ -174,25 +188,27 @@ import jax
 import jax.numpy as jnp
 import gfnx
 
-# 1. Load the reward model. Currently, we load a dummy reward model
+# 1. Load the reward model. Currently we load a dummy reward model.
 reward_module = gfnx.EqxProxyGFPRewardModule(
     proxy_config_path="proxy/configs/dummy_gfp.yaml",
     pretrained_proxy_path="proxy/weights/dummy_gfp/model",
     reward_exponent=1.0,
-    min_reward=1e-6
+    min_reward=1e-6,
 )
 
-# 2. Create an environment and initialize it
-env = gfnx.GFPEnvironment(reward_module)
-# env_params will store the weights of the reward function
+# 2. Create the environment.
+env = gfnx.GFPEnvironment()
 env_params = env.init(jax.random.PRNGKey(0))
 
-# 3. Reset to get the initial observation/state batch.
-obs, state = env.reset(num_envs=1, env_params=env_params)
+# 3. Initialise reward parameters — proxy weights live here.
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
-# 4. Take a forward step.
-action = jnp.array([0], dtype=jnp.int32)
-obs, state, log_reward, done, _ = env.step(state, action, env_params)
+# 4. Reset to a single initial state.
+state = env.reset()
+
+# 5. Take a forward step.
+action = jnp.int32(0)
+obs, state, done, _ = env.step(state, action, env_params)
 ```
 
 

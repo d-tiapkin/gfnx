@@ -17,7 +17,7 @@ def save_checkpoint(path: str, state: Any):
     params = eqx.filter(state, eqx.is_array)
     ckptr.save(
         os.path.abspath(path),  # Checkpoint path should be absolute.
-        args=ocp.args.StandardSave(params)
+        args=ocp.args.StandardSave(params),
     )
     ckptr.wait_until_finished()
 
@@ -41,7 +41,6 @@ def load_checkpoint(path: str, state: Any) -> Any:
     state_params, state_static = eqx.partition(state, eqx.is_array)
     loaded_params = ckptr.restore(
         os.path.abspath(path),  # Checkpoint path should be absolute.
-        state_params
+        state_params,
     )
     return eqx.combine(loaded_params, state_static)
-

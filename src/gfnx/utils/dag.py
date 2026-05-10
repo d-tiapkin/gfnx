@@ -45,7 +45,7 @@ def adj_to_index(adj: chex.Array, all_adjacencies_flat_bits: chex.Array) -> chex
 
 
 # TODO: (agarkovv) Make jit compatible
-def construct_all_dags(num_variables):
+def construct_all_dags(num_variables : int) -> chex.Array:
     """
     Return all possible adjacency matrices for DAGs with a given number of variables
     Shape: (num_graphs, num_variables, num_variables)
@@ -76,7 +76,7 @@ def construct_all_dags(num_variables):
     compressed_dags = sorted(compressed_dags)
     compressed_dags = np.array(compressed_dags)
     adjacencies = np.unpackbits(compressed_dags, axis=1, count=num_variables**2)
-    return jnp.array(adjacencies.reshape(-1, num_variables, num_variables))
+    return jnp.array(adjacencies.reshape(-1, num_variables, num_variables), dtype=jnp.bool)
 
 
 def get_transitive_closure(adjacency_matrix: chex.Array) -> chex.Array:
@@ -161,9 +161,7 @@ def sample_erdos_renyi_graph(
     return graph
 
 
-def sample_linear_gaussian(
-    graph, loc_edges=0.0, scale_edges=1.0, obs_scale=None, rng=None
-):
+def sample_linear_gaussian(graph, loc_edges=0.0, scale_edges=1.0, obs_scale=None, rng=None):
     if obs_scale is None:
         obs_scale = math.sqrt(0.1)
     if rng is None:

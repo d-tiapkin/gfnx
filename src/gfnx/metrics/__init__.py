@@ -23,10 +23,10 @@ from .modes import (
     AccumulatedModesMetricsState,
 )
 from .reward_delta import (
-    MeanRewardMetricsModule,
-    MeanRewardMetricsState,
-    SWMeanRewardMetricsState,
-    SWMeanRewardSWMetricsModule,
+    ExpectedRewardMetricsModule,
+    ExpectedRewardMetricsState,
+    SWExpectedRewardMetricsModule,
+    SWExpectedRewardMetricsState,
 )
 from .top_k import TopKMetricsModule, TopKMetricsState
 
@@ -59,10 +59,10 @@ __all__ = [
     "AccumulatedModesMetricsModule",
     "AccumulatedModesMetricsState",
     # Reward metrics
-    "MeanRewardMetricsModule",
-    "MeanRewardMetricsState",
-    "SWMeanRewardMetricsState",
-    "SWMeanRewardSWMetricsModule",
+    "ExpectedRewardMetricsModule",
+    "ExpectedRewardMetricsState",
+    "SWExpectedRewardMetricsState",
+    "SWExpectedRewardMetricsModule",
     # Top-K metrics
     "TopKMetricsModule",
     "TopKMetricsState",

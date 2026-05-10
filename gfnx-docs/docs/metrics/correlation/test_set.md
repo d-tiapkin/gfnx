@@ -22,9 +22,9 @@ The test-set correlation metric evaluates alignment between learned flow probabi
 
 | Dataclass | Fields | Purpose |
 | --- | --- | --- |
-| `InitArgs` | `env_params`, `test_set` | Supplies the fixed terminal set and environment parameters so log rewards can be cached. |
+| `InitArgs` | `env_params`, `test_set`, `reward_params` | Supplies the fixed terminal set, environment parameters, and reward parameters so log rewards can be cached. |
 | `UpdateArgs` | _empty_ | Streaming updates are not needed; pass nothing between evaluations. |
-| `ProcessArgs` | `policy_params`, `env_params` | Provides the latest policy weights and environment settings for backward rollouts. |
+| `ProcessArgs` | `policy_params`, `env_params`, `reward_params` | Provides the latest policy weights and environment / reward settings for backward rollouts. |
 
 ## Quick start
 
@@ -35,11 +35,15 @@ import jax
 import jax.numpy as jnp
 import gfnx
 
-env = gfnx.HypergridEnvironment(reward_module=gfnx.EasyHypergridRewardModule())
-params = env.init(jax.random.PRNGKey(0))
+reward_module = gfnx.EasyHypergridRewardModule(side=20)
+env = gfnx.HypergridEnvironment()
+env_params = env.init(jax.random.PRNGKey(0))
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
 # Prepare any fixed batch of terminal states (e.g., enumerated dataset or samples from the ground truth).
-test_set = env.get_ground_truth_sampling(jax.random.PRNGKey(123), 512, params)
+test_set = env.get_ground_truth_sampling(
+    jax.random.PRNGKey(123), 512, env_params, reward_module, reward_params
+)
 
 policy_params = {
     "forward_num_actions": env.action_space.n,
@@ -48,26 +52,33 @@ policy_params = {
 
 
 def uniform_backward_policy(rng_key, obs, policy_params):
-    batch = obs.shape[0]
-    backward_logits = jnp.zeros((batch, policy_params["backward_num_actions"]), dtype=jnp.float32)
-    forward_logits = jnp.zeros((batch, policy_params["forward_num_actions"]), dtype=jnp.float32)
+    backward_logits = jnp.zeros((policy_params["backward_num_actions"],), dtype=jnp.float32)
+    forward_logits = jnp.zeros((policy_params["forward_num_actions"],), dtype=jnp.float32)
     info = {"forward_logits": forward_logits, "backward_logits": backward_logits}
     return backward_logits, info
+
 
 metrics = gfnx.metrics.TestCorrelationMetricsModule(
     n_rounds=8,
     bwd_policy_fn=uniform_backward_policy,
     env=env,
+    reward_module=reward_module,
     batch_size=128,
 )
 state = metrics.init(
     jax.random.PRNGKey(1),
-    metrics.InitArgs(env_params=params, test_set=test_set),
+    metrics.InitArgs(
+        env_params=env_params, test_set=test_set, reward_params=reward_params
+    ),
 )
 state = metrics.process(
     state,
     jax.random.PRNGKey(2),
-    metrics.ProcessArgs(policy_params=policy_params, env_params=params),
+    metrics.ProcessArgs(
+        policy_params=policy_params,
+        env_params=env_params,
+        reward_params=reward_params,
+    ),
 )
 scores = metrics.get(state)
 print(float(scores["pearson"]), float(scores["spearman"]))

@@ -1,11 +1,10 @@
 from collections.abc import Callable
-from typing import Any
 
 import chex
 import jax
 import jax.numpy as jnp
 
-from ..base import TEnvironment, TEnvState
+from ..base import TEnvironment, TEnvParams, TEnvState, TRewardModule, TRewardParams
 from ..utils.rollout import (
     TPolicyFn,
     TPolicyParams,
@@ -54,6 +53,7 @@ class TopKMetricsModule(BaseMetricsModule):
     def __init__(
         self,
         env: TEnvironment,
+        reward_module: TRewardModule,
         fwd_policy_fn: TPolicyFn,
         num_traj: int,
         batch_size: int,
@@ -78,6 +78,7 @@ class TopKMetricsModule(BaseMetricsModule):
         self.num_traj = num_traj
         self.batch_size = batch_size
         self.env = env
+        self.reward_module = reward_module
         self.fwd_policy_fn = fwd_policy_fn
         self.top_k = top_k
         self.distance_fn = distance_fn
@@ -161,7 +162,8 @@ class TopKMetricsModule(BaseMetricsModule):
         """
 
         policy_params: TPolicyParams
-        env_params: Any
+        reward_params: TRewardParams
+        env_params: TEnvParams
 
     def process(
         self,
@@ -185,17 +187,16 @@ class TopKMetricsModule(BaseMetricsModule):
         Returns:
             TopKMetricsState: Updated state with computed top-K rewards and diversity statistics
         """
-        # Sample a batch of trajectory
-        _, info = forward_rollout(
-            rng_key,
-            num_envs=self.num_traj,
-            policy_fn=self.fwd_policy_fn,
-            policy_params=args.policy_params,
-            env=self.env,
-            env_params=args.env_params,
-        )
-        final_env_state = info["final_env_state"]
-        rewards = jnp.exp(info["log_gfn_reward"])
+        # Sample a batch of trajectories
+        rng_keys = jax.random.split(rng_key, self.num_traj)
+        _traj_data, final_state, _ = jax.vmap(
+            lambda rng: forward_rollout(
+                rng, self.fwd_policy_fn, args.policy_params, self.env, args.env_params
+            )
+        )(rng_keys)
+        rewards = jax.vmap(
+            self.reward_module.reward, in_axes=(0, None)
+        )(final_state, args.reward_params)
         chex.assert_shape(rewards, (self.num_traj,))
         arg_sort_idx = jnp.argsort(rewards)
 
@@ -206,7 +207,7 @@ class TopKMetricsModule(BaseMetricsModule):
         for idx, k in enumerate(self.top_k):
             top_idx = arg_sort_idx[-k:]
             topk_rew = topk_rew.at[idx].set(jnp.mean(rewards[top_idx]))
-            top_samples = jax.tree.map(lambda x, top_idx=top_idx: x[top_idx], final_env_state)
+            top_samples = jax.tree.map(lambda x, top_idx=top_idx: x[top_idx], final_state)
             num_nonzero_dist = (k - 1) * k
             distance_matrix = self._get_distance_matrix(top_samples, top_samples)
             topk_div = topk_div.at[idx].set(distance_matrix.sum() / num_nonzero_dist)

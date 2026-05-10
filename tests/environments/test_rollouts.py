@@ -5,6 +5,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
+from gfnx.base import BaseEnvironment, BaseRewardModule
 from gfnx.environment.amp import AMPEnvironment
 from gfnx.environment.bitseq import BitseqEnvironment
 from gfnx.environment.dag import DAGEnvironment
@@ -37,9 +38,8 @@ class DummyPolicy:
         self.n_actions = n_actions
 
     def __call__(self, rng_key, obs, policy_params):
-        batch_size = obs.shape[0]
-        logits = jnp.ones((batch_size, self.n_actions))
-        return logits, {"fwd_logits": logits, "bwd_logits": logits}
+        logits = jnp.ones((self.n_actions,))
+        return logits, {"forward_logits": logits, "backward_logits": logits}
 
 
 @pytest.mark.parametrize(
@@ -49,19 +49,19 @@ class DummyPolicy:
             HypergridEnvironment,
             GeneralHypergridRewardModule,
             {"dim": 3, "side": 5},
-            {},
+            {"side": 5},
         ),
         (
             HypergridEnvironment,
             EasyHypergridRewardModule,
             {"dim": 4, "side": 4},
-            {},
+            {"side": 4},
         ),
         (
             HypergridEnvironment,
             HardHypergridRewardModule,
             {"dim": 4, "side": 4},
-            {},
+            {"side": 4},
         ),
         (
             BitseqEnvironment,
@@ -127,27 +127,31 @@ class TestRollouts:
     @pytest.fixture
     def setup_forward_rollout(
         self, environment_class, reward_module_class, env_kwargs, reward_kwargs
-    ):
+    ) -> dict[str, Any]:
         """Setup environment and its components."""
-        reward_module = reward_module_class(**reward_kwargs)
-        env = environment_class(reward_module=reward_module, **env_kwargs)
+        reward_module: BaseRewardModule = reward_module_class(**reward_kwargs)
+        env: BaseEnvironment = environment_class(**env_kwargs)
         rng_key = jax.random.PRNGKey(0)
         num_envs = 1000
         env_params = env.init(rng_key)
+        reward_params = reward_module.init(rng_key, env.reset())
 
         fwd_policy = DummyPolicy(env.action_space.n)
         fwd_policy_params = None
 
-        traj_data, info = forward_rollout(
-            rng_key, num_envs, fwd_policy, fwd_policy_params, env, env_params
-        )
+        rng_keys = jax.random.split(rng_key, num_envs)
+        traj_data, final_states, info = jax.vmap(
+            lambda rng: forward_rollout(rng, fwd_policy, fwd_policy_params, env, env_params)
+        )(rng_keys)
         return {
             "reward_module": reward_module,
+            "reward_params": reward_params,
             "env": env,
             "env_params": env_params,
             "rng_key": rng_key,
             "num_envs": num_envs,
             "traj_data": traj_data,
+            "final_states": final_states,
             "info": info,
         }
 
@@ -157,13 +161,12 @@ class TestRollouts:
         num_envs = setup_forward_rollout["num_envs"]
         env = setup_forward_rollout["env"]
 
-        # Check trajectory shapes
+        # Check trajectory shapes: [num_envs, T+1, ...]
         chex.assert_tree_shape_prefix(traj_data.obs, (num_envs, env.max_steps_in_episode + 1))
         chex.assert_tree_shape_prefix(traj_data.state, (num_envs, env.max_steps_in_episode + 1))
         chex.assert_shape(traj_data.action, (num_envs, env.max_steps_in_episode + 1))
-        chex.assert_shape(traj_data.log_gfn_reward, (num_envs, env.max_steps_in_episode + 1))
         chex.assert_shape(traj_data.done, (num_envs, env.max_steps_in_episode + 1))
-        chex.assert_shape(traj_data.pad, (num_envs, env.max_steps_in_episode + 1))
+        chex.assert_shape(traj_data.valid, (num_envs, env.max_steps_in_episode + 1))
         chex.block_until_chexify_assertions_complete()
 
     def test_backward_rollout_shape(self, setup_forward_rollout: dict[str, Any]):
@@ -173,11 +176,9 @@ class TestRollouts:
         rng_key = setup_forward_rollout["rng_key"]
         num_envs = setup_forward_rollout["num_envs"]
 
-        # Create a dummy policy
         bwd_policy = DummyPolicy(env.backward_action_space.n)
         policy_params = None
 
-        # Create a terminal state for backward rollout
         traj_data = setup_forward_rollout["traj_data"]
         done_indices = jnp.argmax(traj_data.done, axis=1)
         terminating_states = jax.tree.map(
@@ -185,22 +186,18 @@ class TestRollouts:
             traj_data.state,
         )
 
-        traj_data, _ = backward_rollout(
-            rng_key,
-            terminating_states,
-            bwd_policy,
-            policy_params,
-            env,
-            env_params,
-        )
+        rng_keys = jax.random.split(rng_key, num_envs)
+        traj_data, _, _ = jax.vmap(
+            lambda rng, s: backward_rollout(rng, s, bwd_policy, policy_params, env, env_params),
+            in_axes=(0, 0),
+        )(rng_keys, terminating_states)
 
-        # Check trajectory shapes
+        # Check trajectory shapes: [num_envs, T+1, ...]
         chex.assert_tree_shape_prefix(traj_data.obs, (num_envs, env.max_steps_in_episode + 1))
         chex.assert_tree_shape_prefix(traj_data.state, (num_envs, env.max_steps_in_episode + 1))
         chex.assert_shape(traj_data.action, (num_envs, env.max_steps_in_episode + 1))
-        chex.assert_shape(traj_data.log_gfn_reward, (num_envs, env.max_steps_in_episode + 1))
         chex.assert_shape(traj_data.done, (num_envs, env.max_steps_in_episode + 1))
-        chex.assert_shape(traj_data.pad, (num_envs, env.max_steps_in_episode + 1))
+        chex.assert_shape(traj_data.valid, (num_envs, env.max_steps_in_episode + 1))
         chex.block_until_chexify_assertions_complete()
 
     def test_forward_rollout_validity(self, setup_forward_rollout: dict[str, Any]):
@@ -234,11 +231,9 @@ class TestRollouts:
         num_envs = setup_forward_rollout["num_envs"]
         traj_data = setup_forward_rollout["traj_data"]
 
-        # Create a dummy policy
         bwd_policy = DummyPolicy(env.backward_action_space.n)
         policy_params = None
 
-        # Create a terminal state for backward rollout
         done_indices = jnp.argmax(traj_data.done, axis=1)
         terminating_states = jax.tree.map(
             lambda x: x[jnp.arange(num_envs), done_indices],
@@ -258,14 +253,11 @@ class TestRollouts:
             True,
         )
 
-        traj_data, _ = backward_rollout(
-            rng_key,
-            terminating_states,
-            bwd_policy,
-            policy_params,
-            env,
-            env_params,
-        )
+        rng_keys = jax.random.split(rng_key, num_envs)
+        traj_data, _, _ = jax.vmap(
+            lambda rng, s: backward_rollout(rng, s, bwd_policy, policy_params, env, env_params),
+            in_axes=(0, 0),
+        )(rng_keys, terminating_states)
 
         # Check that all trajectories reach initial state
         chex.assert_equal(jnp.all(jnp.any(traj_data.state.is_initial, axis=1)), True)
@@ -279,21 +271,23 @@ class TestRollouts:
         fwd_traj_data = setup_forward_rollout["traj_data"]
 
         def consistency_check(t, carry):
-            traj_data, mask_cond, consistency_cond = carry
+            traj_data, all_valid, consistency_cond = carry
             state = jax.tree.map(lambda x: x[:, t], traj_data.state)
             action = traj_data.action[:, t]
             next_state = jax.tree.map(lambda x: x[:, t + 1], traj_data.state)
-            invalid_mask = env.get_invalid_backward_mask(next_state, env_params)
-            bwd_action = env.get_backward_action(state, action, next_state, env_params)
-            # Check that backward action is valid
-            mask_check = invalid_mask[jnp.arange(num_envs), bwd_action]
-            mask_cond |= jax.lax.select(
+            action_mask = env.get_backward_action_mask_batch(next_state, env_params)
+            bwd_action = env.get_backward_action_batch(state, action, next_state, env_params)
+            # Check that the inferred backward action is valid (mask = True).
+            valid_check = action_mask[jnp.arange(num_envs), bwd_action]
+            all_valid &= jax.lax.select(
                 next_state.is_pad,
-                jnp.zeros_like(mask_check, dtype=jnp.bool_),
-                mask_check,
+                jnp.ones_like(valid_check, dtype=jnp.bool_),
+                valid_check,
             )
 
-            _, cur_state, _, _, _ = env.backward_step(next_state, bwd_action, env_params)
+            _, cur_state, _, _ = jax.vmap(env.backward_step, in_axes=(0, 0, None))(
+                next_state, bwd_action, env_params
+            )
 
             # Compare each attribute and reduce to single bool array
             equality_per_attr = jax.tree.map(lambda x, y: x == y, state, cur_state)
@@ -309,20 +303,20 @@ class TestRollouts:
                 reduced_to_bool,
             )
 
-            return traj_data, mask_cond, consistency_cond
+            return traj_data, all_valid, consistency_cond
 
-        mask_cond = jnp.zeros(num_envs, dtype=jnp.bool_)
+        all_valid = jnp.ones(num_envs, dtype=jnp.bool_)
         consistency_cond = jnp.ones(num_envs, dtype=jnp.bool_)
         jax.lax.fori_loop(
             0,
             env.max_steps_in_episode,
             consistency_check,
-            (fwd_traj_data, mask_cond, consistency_cond),
+            (fwd_traj_data, all_valid, consistency_cond),
         )
         jax.effects_barrier()
         chex.assert_trees_all_equal(
-            mask_cond,
-            jnp.zeros_like(mask_cond, dtype=jnp.bool),
+            all_valid,
+            jnp.ones_like(all_valid, dtype=jnp.bool),
         )
         chex.assert_trees_all_equal(
             consistency_cond,
@@ -332,11 +326,16 @@ class TestRollouts:
 
     def test_reward(self, setup_forward_rollout: dict[str, Any]):
         """Test log_reward functionality"""
-        traj_data = setup_forward_rollout["traj_data"]
+        reward_module = setup_forward_rollout["reward_module"]
+        reward_params = setup_forward_rollout["reward_params"]
+        final_states = setup_forward_rollout["final_states"]
 
-        # Check that log_reward is finite
+        # Check that log_reward on terminal states is finite
+        log_rewards = jax.vmap(reward_module.log_reward, in_axes=(0, None))(
+            final_states, reward_params
+        )
         chex.assert_equal(
-            jnp.all(jnp.isfinite(traj_data.log_gfn_reward)),
+            jnp.all(jnp.isfinite(log_rewards)),
             True,
         )
         chex.block_until_chexify_assertions_complete()

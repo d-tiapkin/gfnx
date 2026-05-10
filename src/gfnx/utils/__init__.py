@@ -9,7 +9,7 @@ from .exploration import (
 from .ising import get_true_ising_J
 from .ising_hbpt_sample import pt_sampler
 from .ising_wolf_sample import wolff_sampler
-from .masking import mask_logits
+from .masking import compute_action_log_probs, masked_mean, masked_sum
 from .molecules import (
     QM9_SMALL_BLOCKS,
     QM9_SMALL_FULL_ALPHABET,
@@ -32,6 +32,7 @@ from .rollout import (
     forward_trajectory_log_probs,
     split_traj_to_transitions,
 )
+from .training import run_training_loop
 
 __all__ = [
     "AMINO_ACIDS",
@@ -51,19 +52,20 @@ __all__ = [
     "backward_rollout",
     "backward_trajectory_log_probs",
     "bitseq",
+    "compute_action_log_probs",
     "corr",
     "create_exploration_schedule",
     "forward_rollout",
     "forward_trajectory_log_probs",
     "get_phylo_initialization_args",
     "get_true_ising_J",
-    "get_true_ising_J",
     "jensen_shannon_divergence",
     "kl_divergence",
     "make_replay_buffer",
-    "mask_logits",
+    "masked_mean",
+    "masked_sum",
     "pt_sampler",
-    "pt_sampler",
+    "run_training_loop",
     "split_traj_to_transitions",
     "total_variation_distance",
     "wolff_sampler",

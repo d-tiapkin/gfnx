@@ -4,7 +4,7 @@ import chex
 import jax
 import jax.numpy as jnp
 
-from ..base import TEnvironment, TEnvParams
+from ..base import TEnvironment, TEnvParams, TRewardModule, TRewardParams
 from ..utils.rollout import (
     TPolicyFn,
     TPolicyParams,
@@ -57,6 +57,8 @@ class EUBOMetricsModule(BaseMetricsModule):
         self,
         env: TEnvironment,
         env_params: TEnvParams,
+        reward_module: TRewardModule,
+        reward_params: TRewardParams,
         bwd_policy_fn: TPolicyFn,
         n_rounds: int,
         batch_size: int,
@@ -67,16 +69,24 @@ class EUBOMetricsModule(BaseMetricsModule):
         Args:
             env: Environment for trajectory generation and reward computation.
             env_params: Environment parameters.
+            reward_module: Reward module for log reward computation.
+            reward_params: Reward parameters (used at init time only; pass current
+                reward_params via ProcessArgs at evaluation time).
             bwd_policy_fn: Backward policy function for generating trajectories starting
                 from terminal states.
             n_rounds: The number of sampling rounds to perform for estimation.
             batch_size: The number of environments to run in parallel for sampling.
         """
         self.env = env
+        self.reward_module = reward_module
         rng_key, sample_key = jax.random.split(rng_key)
-        self.test_set = env.get_ground_truth_sampling(sample_key, batch_size, env_params)
+        self.test_set = env.get_ground_truth_sampling(
+            sample_key, batch_size, env_params, reward_module, reward_params
+        )
         if env.is_normalizing_constant_tractable:
-            self.logZ = jnp.log(env.get_normalizing_constant(env_params))
+            self.logZ = jnp.log(
+                env.get_normalizing_constant(env_params, reward_module, reward_params)
+            )
         else:
             self.logZ = jnp.array(0.0)
         self.bwd_policy_fn = bwd_policy_fn
@@ -122,12 +132,13 @@ class EUBOMetricsModule(BaseMetricsModule):
         Attributes:
             policy_params: Current policy parameters used for forward and backward rollouts
                 to generate terminal states and compute log-ratios.
-            env_params: Environment parameters required for trajectory generation
-                and reward computation.
+            env_params: Environment parameters required for trajectory generation.
+            reward_params: Current reward parameters used for log reward computation.
         """
 
         policy_params: TPolicyParams
         env_params: TEnvParams
+        reward_params: TRewardParams
 
     def process(
         self,
@@ -153,20 +164,21 @@ class EUBOMetricsModule(BaseMetricsModule):
         def process_round(carry_rng_key, _):
             """Process a single round of sampling across all batches."""
             rng_key, rollout_key = jax.random.split(carry_rng_key)
-            bwd_traj_data, _ = backward_rollout(
-                rng_key=rollout_key,
-                init_state=self.test_set,
-                policy_fn=self.bwd_policy_fn,
-                policy_params=args.policy_params,
-                env=self.env,
-                env_params=args.env_params,
-            )
+            rng_keys = jax.random.split(rollout_key, self.batch_size)
+            bwd_traj_data, _, _ = jax.vmap(
+                lambda rng, s: backward_rollout(
+                    rng, s, self.bwd_policy_fn, args.policy_params, self.env, args.env_params
+                ),
+                in_axes=(0, 0),
+            )(rng_keys, self.test_set)
             # EUBO = E_{traj ~ R * Pb} [log Pb(traj | traj_n) + log R(traj_n) - log Pf(traj)]
             # (without normalising constant)
-            log_rewards = self.env.reward_module.log_reward(self.test_set, args.env_params)
-            log_pf_traj, log_pb_traj = backward_trajectory_log_probs(
-                self.env, bwd_traj_data, args.env_params
+            log_rewards = jax.vmap(self.reward_module.log_reward, in_axes=(0, None))(
+                self.test_set, args.reward_params
             )
+            log_pf_traj, log_pb_traj = jax.vmap(
+                lambda td: backward_trajectory_log_probs(self.env, td, args.env_params)
+            )(bwd_traj_data)
             eubo = log_pb_traj - log_pf_traj + log_rewards
             chex.assert_shape(eubo, (self.batch_size,))
             return rng_key, eubo

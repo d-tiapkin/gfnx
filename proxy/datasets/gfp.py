@@ -6,17 +6,16 @@ Command:
 IMPORTANT: install exactly this branch, not the main branch, as the main branch
 has some issues with the tokenizers.
 
-IMPORTANT: Go through the SmilesTokenizer in deepchem and: 
+IMPORTANT: Go through the SmilesTokenizer in deepchem and:
     - delete the two lines:
     #self.max_len_single_sentence = self.max_length - 2
     #self.max_len_sentences_pair = self.max_length - 3
 
-    - rename 
-    self.init_kwargs["max_length"] = self.max_length 
-    --> 
+    - rename
+    self.init_kwargs["max_length"] = self.max_length
+    -->
     self.init_kwargs["model_max_length"] = self.model_max_length
 """
-
 
 import chex
 import jax.numpy as jnp

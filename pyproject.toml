@@ -10,8 +10,8 @@ sources = ["src"]
 name = "gfnx"
 version = "0.0.1"
 dependencies = [
-  "jax>=0.4.27.0",
-  "jaxlib>=0.4.27.0",
+  "jax>=0.4.27.0,<0.10.0",
+  "jaxlib>=0.4.27.0,<0.10.0",
   "chex",
   "flashbax",
   "numpy==1.26.4",
@@ -50,6 +50,9 @@ baselines = [
   "jax_tqdm",
   "pillow",
   "jraph"
+]
+cuda12 = [
+  "jax[cuda12]>=0.4.27.0,<0.10.0",
 ]
 tests = [
   "pytest",

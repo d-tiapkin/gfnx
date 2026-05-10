@@ -35,8 +35,10 @@ import jax
 import jax.numpy as jnp
 import gfnx
 
-env = gfnx.HypergridEnvironment(reward_module=gfnx.EasyHypergridRewardModule())
-params = env.init(jax.random.PRNGKey(0))
+reward_module = gfnx.EasyHypergridRewardModule(side=20)
+env = gfnx.HypergridEnvironment()
+env_params = env.init(jax.random.PRNGKey(0))
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
 policy_params = {
     "forward_num_actions": env.action_space.n,
@@ -45,17 +47,15 @@ policy_params = {
 
 
 def uniform_forward_policy(rng_key, obs, policy_params):
-    batch = obs.shape[0]
-    forward_logits = jnp.zeros((batch, policy_params["forward_num_actions"]), dtype=jnp.float32)
-    backward_logits = jnp.zeros((batch, policy_params["backward_num_actions"]), dtype=jnp.float32)
+    forward_logits = jnp.zeros((policy_params["forward_num_actions"],), dtype=jnp.float32)
+    backward_logits = jnp.zeros((policy_params["backward_num_actions"],), dtype=jnp.float32)
     info = {"forward_logits": forward_logits, "backward_logits": backward_logits}
     return forward_logits, info
 
 
 def uniform_backward_policy(rng_key, obs, policy_params):
-    batch = obs.shape[0]
-    backward_logits = jnp.zeros((batch, policy_params["backward_num_actions"]), dtype=jnp.float32)
-    forward_logits = jnp.zeros((batch, policy_params["forward_num_actions"]), dtype=jnp.float32)
+    backward_logits = jnp.zeros((policy_params["backward_num_actions"],), dtype=jnp.float32)
+    forward_logits = jnp.zeros((policy_params["forward_num_actions"],), dtype=jnp.float32)
     info = {"forward_logits": forward_logits, "backward_logits": backward_logits}
     return backward_logits, info
 
@@ -67,13 +67,18 @@ metrics = gfnx.metrics.OnPolicyCorrelationMetricsModule(
     fwd_policy_fn=uniform_forward_policy,
     bwd_policy_fn=uniform_backward_policy,
     env=env,
+    reward_module=reward_module,
 )
-state = metrics.init(jax.random.PRNGKey(1), metrics.InitArgs(env_params=params))
+state = metrics.init(jax.random.PRNGKey(1), metrics.InitArgs(env_params=env_params))
 
 state = metrics.process(
     state,
     jax.random.PRNGKey(2),
-    metrics.ProcessArgs(policy_params=policy_params, env_params=params),
+    metrics.ProcessArgs(
+        policy_params=policy_params,
+        env_params=env_params,
+        reward_params=reward_params,
+    ),
 )
 scores = metrics.get(state)
 print(float(scores["pearson"]), float(scores["spearman"]))

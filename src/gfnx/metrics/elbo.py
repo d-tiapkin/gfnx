@@ -4,7 +4,7 @@ import chex
 import jax
 import jax.numpy as jnp
 
-from ..base import TEnvironment, TEnvParams
+from ..base import TEnvironment, TEnvParams, TRewardModule, TRewardParams
 from ..utils.rollout import (
     TPolicyFn,
     TPolicyParams,
@@ -55,6 +55,8 @@ class ELBOMetricsModule(BaseMetricsModule):
         self,
         env: TEnvironment,
         env_params: TEnvParams,
+        reward_module: TRewardModule,
+        reward_params: TRewardParams,
         fwd_policy_fn: TPolicyFn,
         n_rounds: int,
         batch_size: int,
@@ -64,13 +66,19 @@ class ELBOMetricsModule(BaseMetricsModule):
         Args:
             env: Environment for trajectory generation and reward computation.
             env_params: Environment parameters used for trajectory generation.
+            reward_module: Reward module for log reward computation.
+            reward_params: Reward parameters (used at init time only; pass current
+                reward_params via ProcessArgs at evaluation time).
             fwd_policy_fn: Forward policy function for generating trajectories.
             n_rounds: The number of sampling rounds to perform for estimation.
             batch_size: The number of environments to run in parallel for sampling.
         """
         self.env = env
+        self.reward_module = reward_module
         if env.is_normalizing_constant_tractable:
-            self.logZ = jnp.log(env.get_normalizing_constant(env_params))
+            self.logZ = jnp.log(
+                env.get_normalizing_constant(env_params, reward_module, reward_params)
+            )
         else:
             self.logZ = jnp.array(0.0)
         self.fwd_policy_fn = fwd_policy_fn
@@ -116,12 +124,13 @@ class ELBOMetricsModule(BaseMetricsModule):
         Attributes:
             policy_params: Current policy parameters used for forward and backward rollouts
                 to generate terminal states and compute log-ratios.
-            env_params: Environment parameters required for trajectory generation
-                and reward computation.
+            env_params: Environment parameters required for trajectory generation.
+            reward_params: Current reward parameters used for log reward computation.
         """
 
         policy_params: TPolicyParams
         env_params: TEnvParams
+        reward_params: TRewardParams
 
     def process(
         self,
@@ -147,20 +156,21 @@ class ELBOMetricsModule(BaseMetricsModule):
         def process_round(carry_rng_key, _):
             """Process a single round of sampling across all batches."""
             rng_key, rollout_key = jax.random.split(carry_rng_key)
-            fwd_traj_data, aux_info = forward_rollout(
-                rng_key=rollout_key,
-                num_envs=self.batch_size,
-                policy_fn=self.fwd_policy_fn,
-                policy_params=args.policy_params,
-                env=self.env,
-                env_params=args.env_params,
-            )
+            rng_keys = jax.random.split(rollout_key, self.batch_size)
+            fwd_traj_data, final_states, _ = jax.vmap(
+                lambda rng: forward_rollout(
+                    rng, self.fwd_policy_fn, args.policy_params, self.env, args.env_params
+                )
+            )(rng_keys)
             # ELBO = E_{traj ~ Pf} [log Pb(traj | traj_n) + log R(traj_n) - log Pf(traj)]
             # (without normalising constant)
-            log_pf_traj, log_pb_traj = forward_trajectory_log_probs(
-                self.env, fwd_traj_data, args.env_params
+            log_pf_traj, log_pb_traj = jax.vmap(
+                lambda td: forward_trajectory_log_probs(self.env, td, args.env_params)
+            )(fwd_traj_data)
+            log_rewards = jax.vmap(self.reward_module.log_reward, in_axes=(0, None))(
+                final_states, args.reward_params
             )
-            elbo = log_pb_traj - log_pf_traj + aux_info["log_gfn_reward"]
+            elbo = log_pb_traj - log_pf_traj + log_rewards
             chex.assert_shape(elbo, (self.batch_size,))
             return rng_key, elbo
 

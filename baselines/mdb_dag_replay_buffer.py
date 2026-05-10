@@ -11,7 +11,6 @@ performance tips when running on GPU, i.e., XLA flags.
 
 """
 
-import functools
 import logging
 import os
 from typing import NamedTuple
@@ -23,7 +22,6 @@ import jax
 import jax.numpy as jnp
 import jraph
 import optax
-from jax_tqdm import loop_tqdm
 from omegaconf import OmegaConf
 from utils.checkpoint import save_checkpoint
 from utils.logger import Writer
@@ -289,7 +287,9 @@ class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
     config: OmegaConf
     env: gfnx.DAGEnvironment
-    env_params: chex.Array
+    env_params: gfnx.DAGEnvParams
+    reward_module: gfnx.DAGRewardModule
+    reward_params: gfnx.DAGRewardParams
     replay_buffer: ReplayBuffer[TransitionData]
     replay_buffer_state: ReplayBufferState[TransitionData]
     exploration_schedule: optax.Schedule
@@ -299,55 +299,57 @@ class TrainState(NamedTuple):
     opt_state: optax.OptState
     metrics_module: MultiMetricsModule
     metrics_state: MultiMetricsState
+    eval_info: dict
+
 
 def collect_step(
-    idx: int, train_state: TrainState,
+    idx: int,
+    train_state: TrainState,
 ) -> tuple[TrainState, dict[str, chex.Array]]:
     """Rollout trajectories and add transitions to the replay buffer."""
     rng_key, sample_traj_key = jax.random.split(train_state.rng_key)
     policy_params, policy_static = eqx.partition(train_state.model, eqx.is_array)
     cur_eps = train_state.exploration_schedule(idx)
+    num_envs = train_state.config.num_envs
+    env = train_state.env
+    env_params = train_state.env_params
 
-    def fwd_policy_fn(
-        rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
-    ) -> chex.Array:
+    def fwd_policy_fn(fwd_rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params) -> chex.Array:
         policy = eqx.combine(policy_params, policy_static)
-        policy_outputs = policy(env_obs)
+        # GNNPolicy expects a batch dimension: unsqueeze, call, then squeeze
+        policy_outputs = jax.tree.map(lambda x: x.squeeze(0), policy(env_obs[None]))
         logits = policy_outputs["forward_logits"]
-        rng_key, exploration_key = jax.random.split(rng_key)
-        batch_size = logits.shape[0]
-        exploration_mask = jax.random.bernoulli(
-            exploration_key, cur_eps, (batch_size,)
-        )
-        logits = jnp.where(exploration_mask[..., None], 0, logits)
-        policy_outputs = eqx.tree_at(
-            lambda x: x["forward_logits"], policy_outputs, logits
-        )
+        _rng_key, exploration_key = jax.random.split(fwd_rng_key)
+        do_explore = jax.random.bernoulli(exploration_key, cur_eps)
+        logits = jnp.where(do_explore, 0, logits)
         return logits, policy_outputs
 
-    traj_data, log_info = gfnx.utils.forward_rollout(
-        rng_key=sample_traj_key,
-        num_envs=train_state.config.num_envs,
-        policy_fn=fwd_policy_fn,
-        policy_params=policy_params,
-        env=train_state.env,
-        env_params=train_state.env_params,
-    )
+    rng_keys = jax.random.split(sample_traj_key, num_envs)
+    traj_data, final_states, info = jax.vmap(
+        lambda rng: gfnx.utils.forward_rollout(rng, fwd_policy_fn, policy_params, env, env_params)
+    )(rng_keys)
 
-    _, log_pb_traj = gfnx.utils.forward_trajectory_log_probs(
-        train_state.env, traj_data, train_state.env_params
+    log_rewards = jax.vmap(train_state.reward_module.log_reward, in_axes=(0, None))(
+        final_states, train_state.reward_params
     )
-    rl_reward = log_pb_traj + log_info["log_gfn_reward"] + log_info["entropy"]
+    log_pb_traj = jax.vmap(
+        lambda td: gfnx.utils.forward_trajectory_log_probs(env, td, env_params)
+    )(traj_data)[1]
+    rl_reward = log_pb_traj + log_rewards + info["entropy"]
 
-    transitions = gfnx.utils.split_traj_to_transitions(traj_data)
+    transitions = jax.tree.map(
+        lambda x: x.reshape((-1,) + x.shape[2:]),
+        jax.vmap(gfnx.utils.split_traj_to_transitions)(traj_data),
+    )
     replay_buffer_state = train_state.replay_buffer.add(
-        train_state.replay_buffer_state, transitions,
+        train_state.replay_buffer_state,
+        transitions,
     )
 
     collect_info = {
-        "entropy": log_info["entropy"].mean(),
-        "mean_reward": jnp.exp(log_info["log_gfn_reward"]).mean(),
-        "mean_log_reward": log_info["log_gfn_reward"].mean(),
+        "entropy": info["entropy"].mean(),
+        "mean_reward": jnp.exp(log_rewards).mean(),
+        "mean_log_reward": log_rewards.mean(),
         "rl_reward": rl_reward.mean(),
     }
     return train_state._replace(
@@ -357,31 +359,37 @@ def collect_step(
 
 
 def update_step(
-    idx: int, train_state: TrainState,
+    idx: int,
+    train_state: TrainState,
 ) -> tuple[TrainState, dict[str, chex.Array]]:
-    """Sample from replay buffer, compute MDB loss, and update model.
-    """
+    """Sample from replay buffer, compute MDB loss, and update model."""
     rng_key, sample_key = jax.random.split(train_state.rng_key)
     can_sample = train_state.replay_buffer.can_sample(
         train_state.replay_buffer_state,
     )
 
     transitions = train_state.replay_buffer.sample(
-        train_state.replay_buffer_state, sample_key,
+        train_state.replay_buffer_state,
+        sample_key,
     )
-    bwd_actions = train_state.env.get_backward_action(
-        transitions.state, transitions.action,
-        transitions.next_state, train_state.env_params,
+    bwd_actions = train_state.env.get_backward_action_batch(
+        transitions.state,
+        transitions.action,
+        transitions.next_state,
+        train_state.env_params,
     )
 
     def loss_fn(model: GNNPolicy) -> chex.Array:
-        # Call the network to get the logits
+        # Call the network to get the logits (GNNPolicy is internally batched)
         policy_outputs = model(transitions.obs)
         # Compute the forward log-probs
         fwd_logits = policy_outputs["forward_logits"]
-        invalid_mask = train_state.env.get_invalid_mask(transitions.state, train_state.env_params)
-        masked_fwd_logits = gfnx.utils.mask_logits(fwd_logits, invalid_mask)
-        fwd_all_log_probs = jax.nn.log_softmax(masked_fwd_logits, axis=-1)
+        action_mask = train_state.env.get_action_mask_batch(
+            transitions.state, train_state.env_params
+        )
+        fwd_all_log_probs = jax.nn.log_softmax(
+            fwd_logits, where=action_mask, axis=-1
+        )
         sink_logprobs = fwd_all_log_probs[:, -1]
         fwd_logprobs = jnp.take_along_axis(
             fwd_all_log_probs,
@@ -389,48 +397,55 @@ def update_step(
             axis=-1,
         ).squeeze(-1)
 
-        # Compute the stats for the next state
+        # Compute the stats for the next state (GNNPolicy is internally batched)
         next_policy_outputs = train_state.target_model(transitions.next_obs)
         next_fwd_logits = next_policy_outputs["forward_logits"]
-        next_fwd_invalid_mask = train_state.env.get_invalid_mask(
-            transitions.next_state, train_state.env_params,
+        next_action_mask = train_state.env.get_action_mask_batch(
+            transitions.next_state,
+            train_state.env_params,
         )
-        masked_next_fwd_logits = gfnx.utils.mask_logits(next_fwd_logits, next_fwd_invalid_mask)
-        next_fwd_all_log_probs = jax.nn.log_softmax(masked_next_fwd_logits, axis=-1)
+        next_fwd_all_log_probs = jax.nn.log_softmax(
+            next_fwd_logits, where=next_action_mask, axis=-1
+        )
         next_sink_logprobs = next_fwd_all_log_probs[:, -1]
 
         bwd_logits = next_policy_outputs["backward_logits"]
-        next_bwd_invalid_mask = train_state.env.get_invalid_backward_mask(
-            transitions.next_state, train_state.env_params,
+        next_backward_action_mask = train_state.env.get_backward_action_mask_batch(
+            transitions.next_state,
+            train_state.env_params,
         )
-        masked_bwd_logits = gfnx.utils.mask_logits(bwd_logits, next_bwd_invalid_mask)
-        bwd_all_log_probs = jax.nn.log_softmax(masked_bwd_logits, axis=-1)
-        bwd_logprobs = jnp.take_along_axis(
-            bwd_all_log_probs, jnp.expand_dims(bwd_actions, axis=-1), axis=-1
-        ).squeeze(-1)
-        delta_score = train_state.env.reward_module.delta_score(
+        bwd_logprobs = gfnx.utils.compute_action_log_probs(
+            bwd_logits, bwd_actions, next_backward_action_mask
+        )
+        delta_score = jax.vmap(
+            train_state.reward_module.delta_score,
+            in_axes=(0, 0, 0, None, None),
+        )(
             transitions.state,
             transitions.action,
             transitions.next_state,
             train_state.env_params,
+            train_state.reward_params,
         )
 
-        # Compute the MDB loss with masking
-        done_or_pad = transitions.done | transitions.pad
+        # Compute the MDB loss only over active (non-terminal, non-padding) transitions.
+        active = transitions.valid & jnp.logical_not(transitions.done)
         error = next_sink_logprobs + fwd_logprobs - sink_logprobs - bwd_logprobs - delta_score
-        error = jnp.where(done_or_pad, 0.0, error)
-        return optax.huber_loss(error).sum() / jnp.logical_not(done_or_pad).sum()
-
+        error = jnp.where(active, error, 0.0)
+        return optax.huber_loss(error).sum() / active.sum()
 
     loss, grads = eqx.filter_value_and_grad(loss_fn)(train_state.model)
     updates, new_opt_state = train_state.optimizer.update(
-        grads, train_state.opt_state, eqx.filter(train_state.model, eqx.is_array),
+        grads,
+        train_state.opt_state,
+        eqx.filter(train_state.model, eqx.is_array),
     )
     new_model = eqx.apply_updates(train_state.model, updates)
 
     # Keep old state when buffer is not ready
     def select(new, old):
         return jax.tree.map(lambda n, o: jnp.where(can_sample, n, o), new, old)
+
     new_params, model_static = eqx.partition(new_model, eqx.is_array)
     old_params, _ = eqx.partition(train_state.model, eqx.is_array)
     model = eqx.combine(select(new_params, old_params), model_static)
@@ -451,54 +466,59 @@ def update_step(
         "grad_norm": jnp.where(can_sample, optax.tree_utils.tree_l2_norm(grads), jnp.nan),
     }
     return train_state._replace(
-        rng_key=rng_key, model=model, target_model=target_model, opt_state=opt_state,
+        rng_key=rng_key,
+        model=model,
+        target_model=target_model,
+        opt_state=opt_state,
     ), update_info
 
 
 def eval_step(
-    idx: int, train_state: TrainState,
+    idx: int,
+    train_state: TrainState,
 ) -> TrainState:
     """Compute evaluation metrics if on an eval step, otherwise pass through."""
-    is_eval_step = idx % train_state.config.logging.track_each == 0
-    is_eval_step = is_eval_step | (idx + 1 == train_state.config.num_train_steps)
-
     _, eval_rng_key = jax.random.split(train_state.rng_key)
     model_params, _ = eqx.partition(train_state.model, eqx.is_array)
 
-    def do_eval():
-        return train_state.metrics_module.process(
-            metrics_state=train_state.metrics_state,
-            rng_key=eval_rng_key,
-            args=train_state.metrics_module.ProcessArgs(
-                metrics_args={
-                    "exact_distribution": ExactDistributionMetricsModule.ProcessArgs(
-                        policy_params=model_params,
-                        env_params=train_state.env_params,
-                    ),
-                    "reward_corr": TestCorrelationMetricsModule.ProcessArgs(
-                        policy_params=model_params,
-                        env_params=train_state.env_params,
-                    ),
-                    "edge_corr": TestCorrelationMetricsModule.ProcessArgs(
-                        policy_params=model_params,
-                        env_params=train_state.env_params,
-                    ),
-                    "path_corr": TestCorrelationMetricsModule.ProcessArgs(
-                        policy_params=model_params,
-                        env_params=train_state.env_params,
-                    ),
-                    "markov_blanket_corr": TestCorrelationMetricsModule.ProcessArgs(
-                        policy_params=model_params,
-                        env_params=train_state.env_params,
-                    ),
-                }
-            ),
-        )
-
-    metrics_state = jax.lax.cond(
-        is_eval_step, do_eval, lambda: train_state.metrics_state,
+    metrics_state, eval_info = train_state.metrics_module.step(
+        idx=idx,
+        metrics_state=train_state.metrics_state,
+        rng_key=eval_rng_key,
+        update_args=train_state.metrics_module.UpdateArgs(metrics_args={}),
+        process_args=train_state.metrics_module.ProcessArgs(
+            metrics_args={
+                "exact_distribution": ExactDistributionMetricsModule.ProcessArgs(
+                    policy_params=model_params,
+                    env_params=train_state.env_params,
+                ),
+                "reward_corr": TestCorrelationMetricsModule.ProcessArgs(
+                    policy_params=model_params,
+                    env_params=train_state.env_params,
+                    reward_params=train_state.reward_params,
+                ),
+                "edge_corr": TestCorrelationMetricsModule.ProcessArgs(
+                    policy_params=model_params,
+                    env_params=train_state.env_params,
+                    reward_params=train_state.reward_params,
+                ),
+                "path_corr": TestCorrelationMetricsModule.ProcessArgs(
+                    policy_params=model_params,
+                    env_params=train_state.env_params,
+                    reward_params=train_state.reward_params,
+                ),
+                "markov_blanket_corr": TestCorrelationMetricsModule.ProcessArgs(
+                    policy_params=model_params,
+                    env_params=train_state.env_params,
+                    reward_params=train_state.reward_params,
+                ),
+            }
+        ),
+        eval_each=train_state.config.logging.eval_each,
+        num_train_steps=train_state.config.num_train_steps,
+        prev_eval_info=train_state.eval_info,
     )
-    return train_state._replace(metrics_state=metrics_state)
+    return train_state._replace(metrics_state=metrics_state, eval_info=eval_info)
 
 
 @eqx.filter_jit
@@ -511,19 +531,12 @@ def train_step(
     train_state, update_info = update_step(idx, train_state)
     train_state = eval_step(idx, train_state)
 
-    def logging_callback(
-        idx: int, train_info: dict, metrics_state: MultiMetricsState, cfg
-    ):
-        train_info = {
-            f"train/{key}": float(value) for key, value in train_info.items()
-        }
+    def logging_callback(idx: int, train_info: dict, eval_info: dict, cfg):
+        train_info = {f"train/{key}": float(value) for key, value in train_info.items()}
         if idx % cfg.logging.eval_each == 0 or idx + 1 == cfg.num_train_steps:
             log.info(f"Step {idx}")
             log.info(train_info)
-            eval_info = train_state.metrics_module.get(metrics_state)
-            eval_info = {
-                f"eval/{key}": float(value) for key, value in eval_info.items()
-            }
+            eval_info = {f"eval/{key}": float(value) for key, value in eval_info.items()}
             log.info(eval_info)
             if cfg.logging.use_writer:
                 writer.log(eval_info, commit=False)
@@ -534,7 +547,7 @@ def train_step(
         logging_callback,
         idx,
         {**collect_info, **update_info},
-        train_state.metrics_state,
+        train_state.eval_info,
         train_state.config,
         ordered=True,
     )
@@ -589,14 +602,14 @@ def run_experiment(cfg: OmegaConf) -> None:
         )
     else:
         raise ValueError(f"Unknown likelihood type: {cfg.environment.likelihood.type}")
-    reward_module = gfnx.DAGRewardModule(prior=prior, likelihood=likelihood)
 
     # Initialize the environment and its inner parameters
     env = gfnx.environment.DAGEnvironment(
-        reward_module,
         num_variables=cfg.environment.num_variables,
     )
+    reward_module = gfnx.DAGRewardModule(prior=prior, likelihood=likelihood)
     env_params = env.init(env_init_key)
+    reward_params = reward_module.init(env_init_key, env.reset())
 
     # Initialize the replay buffer
     replay_buffer = make_replay_buffer(
@@ -604,19 +617,18 @@ def run_experiment(cfg: OmegaConf) -> None:
         min_length=cfg.replay_buffer.min_length,
         sample_batch_size=cfg.replay_buffer.sample_batch_size,
     )
-    dummy_state = env.get_init_state(1)
+    dummy_state = env.reset()
     dummy_obs = env.get_obs(dummy_state, env_params)
-    dummy_action = env.sample_action(rng_key, jnp.zeros((1, env.action_space.n)))
-    dummy_transition = jax.tree.map(lambda x: x.squeeze(0), TransitionData(
+    dummy_action = jnp.array(0, dtype=jnp.int32)
+    dummy_transition = TransitionData(
         obs=dummy_obs,
         state=dummy_state,
         action=dummy_action,
-        log_gfn_reward=reward_module.log_reward(dummy_state, env_params),
         next_obs=dummy_obs,
         next_state=dummy_state,
-        done=jnp.zeros(1, dtype=jnp.bool),
-        pad=jnp.zeros(1, dtype=jnp.bool),
-    ))
+        done=jnp.bool_(False),
+        pad=jnp.bool_(False),
+    )
     replay_buffer_state = replay_buffer.init(dummy_transition)
 
     rng_key, net_init_key = jax.random.split(rng_key)
@@ -648,7 +660,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     ) -> tuple[chex.Array, dict[str, chex.Array]]:
         del rng_key
         policy = eqx.combine(policy_params, policy_static)
-        policy_outputs = policy(env_obs)
+        policy_outputs = jax.tree.map(lambda x: x.squeeze(0), policy(env_obs[None]))
         return policy_outputs["forward_logits"], policy_outputs
 
     def bwd_policy_fn(
@@ -656,7 +668,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     ) -> tuple[chex.Array, dict[str, chex.Array]]:
         del rng_key
         policy = eqx.combine(policy_params, policy_static)
-        policy_outputs = policy(env_obs)
+        policy_outputs = jax.tree.map(lambda x: x.squeeze(0), policy(env_obs[None]))
         return policy_outputs["backward_logits"], policy_outputs
 
     def edge_score_transform_fn(env_state: gfnx.DAGEnvState, log_score: chex.Array) -> chex.Array:
@@ -695,16 +707,19 @@ def run_experiment(cfg: OmegaConf) -> None:
             metrics=["tv", "kl", "jsd"],
             env=env,
             fwd_policy_fn=fwd_policy_fn,
+            reward_module=reward_module,
             batch_size=cfg.metrics.batch_size,
         ),
         "reward_corr": TestCorrelationMetricsModule(
             env=env,
+            reward_module=reward_module,
             bwd_policy_fn=bwd_policy_fn,
             n_rounds=cfg.metrics.n_rounds,
             batch_size=cfg.metrics.batch_size,
         ),
         "edge_corr": TestCorrelationMetricsModule(
             env=env,
+            reward_module=reward_module,
             bwd_policy_fn=bwd_policy_fn,
             n_rounds=cfg.metrics.n_rounds,
             batch_size=cfg.metrics.batch_size,
@@ -712,6 +727,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         ),
         "path_corr": TestCorrelationMetricsModule(
             env=env,
+            reward_module=reward_module,
             bwd_policy_fn=bwd_policy_fn,
             n_rounds=cfg.metrics.n_rounds,
             batch_size=cfg.metrics.batch_size,
@@ -719,6 +735,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         ),
         "markov_blanket_corr": TestCorrelationMetricsModule(
             env=env,
+            reward_module=reward_module,
             bwd_policy_fn=bwd_policy_fn,
             n_rounds=cfg.metrics.n_rounds,
             batch_size=cfg.metrics.batch_size,
@@ -745,33 +762,41 @@ def run_experiment(cfg: OmegaConf) -> None:
         metrics_module.InitArgs(
             metrics_args={
                 "exact_distribution": ExactDistributionMetricsModule.InitArgs(
-                    env_params=env_params
+                    env_params=env_params, reward_params=reward_params
                 ),
                 "reward_corr": TestCorrelationMetricsModule.InitArgs(
                     env_params=env_params,
                     test_set=test_set_states,
+                    reward_params=reward_params,
                 ),
                 "edge_corr": TestCorrelationMetricsModule.InitArgs(
                     env_params=env_params,
                     test_set=test_set_states,
+                    reward_params=reward_params,
                 ),
                 "path_corr": TestCorrelationMetricsModule.InitArgs(
                     env_params=env_params,
                     test_set=test_set_states,
+                    reward_params=reward_params,
                 ),
                 "markov_blanket_corr": TestCorrelationMetricsModule.InitArgs(
                     env_params=env_params,
                     test_set=test_set_states,
+                    reward_params=reward_params,
                 ),
             }
         ),
     )
+
+    eval_info = metrics_module.get(metrics_state)
 
     train_state = TrainState(
         rng_key=rng_key,
         config=cfg,
         env=env,
         env_params=env_params,
+        reward_module=reward_module,
+        reward_params=reward_params,
         replay_buffer=replay_buffer,
         replay_buffer_state=replay_buffer_state,
         exploration_schedule=exploration_schedule,
@@ -781,18 +806,8 @@ def run_experiment(cfg: OmegaConf) -> None:
         opt_state=opt_state,
         metrics_module=metrics_module,
         metrics_state=metrics_state,
+        eval_info=eval_info,
     )
-    # Split train state into parameters and static parts to make jit work.
-    train_state_params, train_state_static = eqx.partition(train_state, eqx.is_array)
-
-    @functools.partial(jax.jit, donate_argnums=(1,))
-    @loop_tqdm(cfg.num_train_steps, print_rate=cfg.logging["tqdm_print_rate"])
-    def train_step_wrapper(idx: int, train_state_params):
-        # Wrapper to use a usual jit in jax, since it is required by fori_loop.
-        train_state = eqx.combine(train_state_params, train_state_static)
-        train_state = train_step(idx, train_state)
-        train_state_params, _ = eqx.partition(train_state, eqx.is_array)
-        return train_state_params
 
     if cfg.logging.use_writer:
         log.info("Initialize writer")
@@ -814,17 +829,9 @@ def run_experiment(cfg: OmegaConf) -> None:
         )
 
     log.info("Start training")
-    # Run the training loop via jax.lax.fori_loop
-    train_state_params = jax.lax.fori_loop(
-        lower=0,
-        upper=cfg.num_train_steps,
-        body_fun=train_step_wrapper,
-        init_val=train_state_params,
+    final_train_state = gfnx.utils.run_training_loop(
+        train_step, train_state, cfg.num_train_steps, cfg.logging["tqdm_print_rate"]
     )
-    jax.block_until_ready(train_state_params)
-
-    # Save the final model
-    train_state = eqx.combine(train_state_params, train_state_static)
     dir = (
         cfg.logging.checkpoint_dir
         if cfg.logging.checkpoint_dir
@@ -833,7 +840,7 @@ def run_experiment(cfg: OmegaConf) -> None:
             f"checkpoints_{os.getpid()}/",
         )
     )
-    save_checkpoint(os.path.join(dir, "train_state"), train_state)
+    save_checkpoint(os.path.join(dir, "train_state"), final_train_state)
 
 
 if __name__ == "__main__":
