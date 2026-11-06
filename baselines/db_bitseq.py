@@ -355,8 +355,8 @@ def run_experiment(cfg: OmegaConf) -> None:
     policy_static = eqx.filter(model, eqx.is_array, inverse=True)
 
     def bwd_policy_fn(
-            rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
-        ) -> tuple[chex.Array, dict]:
+        rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
+    ) -> tuple[chex.Array, dict]:
         # We are using a deterministic backward policy for evaluation
         del rng_key
         policy = eqx.combine(policy_params, policy_static)
@@ -424,12 +424,8 @@ def run_experiment(cfg: OmegaConf) -> None:
     )
     if cfg.logging.use_writer:
         log.info("Initialize writer")
-        log_dir = (
-            cfg.logging.log_dir
-            if cfg.logging.log_dir
-            else os.path.join(
-                hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
-            )
+        log_dir = cfg.logging.log_dir or os.path.join(
+            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
         )
         writer.init(
             writer_type=cfg.writer.writer_type,
@@ -445,13 +441,9 @@ def run_experiment(cfg: OmegaConf) -> None:
     train_state = gfnx.utils.run_training_loop(
         train_step, train_state, cfg.num_train_steps, cfg.logging["tqdm_print_rate"]
     )
-    dir = (
-        cfg.logging.checkpoint_dir
-        if cfg.logging.checkpoint_dir
-        else os.path.join(
-            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
-            f"checkpoints_{os.getpid()}/",
-        )
+    dir = cfg.logging.checkpoint_dir or os.path.join(
+        hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
+        f"checkpoints_{os.getpid()}/",
     )
     save_checkpoint(os.path.join(dir, "train_state"), train_state)
     save_checkpoint(os.path.join(dir, "model"), train_state.model)

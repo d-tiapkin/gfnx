@@ -80,7 +80,7 @@ def forward_rollout(
             `env_obs` can be any PyTree matching the environment's observation
             structure. The first output contains (unmasked) action logits of
             shape `[n_actions]`; the info dict may include forward/backward
-            logits under the keys `fwd_logits` and `bwd_logits`.
+            logits under the keys `forward_logits` and `backward_logits`.
         policy_params: Parameters consumed by `policy_fn`.
         env: Environment instance exposing `reset`, `step`, and `get_action_mask`.
         env_params: Environment parameters (typically static).

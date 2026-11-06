@@ -22,21 +22,21 @@ class MetricsState:
     """
 
 
-class BaseInitArgs(ABC):
+class BaseInitArgs:
     """
     Base class for argument containers passed as `args` to the `init` method
     of metric modules.
     """
 
 
-class BaseUpdateArgs(ABC):
+class BaseUpdateArgs:
     """
     Base class for argument containers passed as `args` to the `update` method
     of metric modules.
     """
 
 
-class BaseProcessArgs(ABC):
+class BaseProcessArgs:
     """
     Base class for argument containers passed as `args` to the `process` method
     of metric modules.
@@ -229,17 +229,18 @@ class BaseMetricsModule(ABC, Generic[TInitArgs, TUpdateArgs, TProcessArgs, TMetr
         Returns:
             Tuple of (new_metrics_state, eval_info).
         """
-        metrics_state = self.update(metrics_state, rng_key=rng_key, args=update_args)
+        update_key, process_key = jax.random.split(rng_key)
+        metrics_state = self.update(metrics_state, rng_key=update_key, args=update_args)
         is_eval_step = (idx % eval_each == 0) | (idx + 1 == num_train_steps)
         metrics_state = jax.lax.cond(
             is_eval_step,
             lambda kwargs: self.process(**kwargs),
             lambda kwargs: kwargs["metrics_state"],
-            {"metrics_state": metrics_state, "rng_key": rng_key, "args": process_args},
+            {"metrics_state": metrics_state, "rng_key": process_key, "args": process_args},
         )
         eval_info = jax.lax.cond(
             is_eval_step,
-            lambda ms: self.get(ms),
+            self.get,
             lambda ms: prev_eval_info,
             metrics_state,
         )

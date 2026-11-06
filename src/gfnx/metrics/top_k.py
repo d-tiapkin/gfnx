@@ -194,9 +194,9 @@ class TopKMetricsModule(BaseMetricsModule):
                 rng, self.fwd_policy_fn, args.policy_params, self.env, args.env_params
             )
         )(rng_keys)
-        rewards = jax.vmap(
-            self.reward_module.reward, in_axes=(0, None)
-        )(final_state, args.reward_params)
+        rewards = jax.vmap(self.reward_module.reward, in_axes=(0, None))(
+            final_state, args.reward_params
+        )
         chex.assert_shape(rewards, (self.num_traj,))
         arg_sort_idx = jnp.argsort(rewards)
 

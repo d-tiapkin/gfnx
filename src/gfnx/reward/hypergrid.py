@@ -17,6 +17,7 @@ class GeneralHypergridRewardModule(
 ):
     def __init__(
         self,
+        *,
         side: int,
         R0: float = 1e-3,
         R1: float = 0.5,
@@ -61,10 +62,10 @@ class GeneralHypergridRewardModule(
 
 # Two specific use cases
 class EasyHypergridRewardModule(GeneralHypergridRewardModule):
-    def __init__(self, side: int) -> None:
+    def __init__(self, *, side: int) -> None:
         super().__init__(side=side, R0=1e-3, R1=0.5, R2=2.0)
 
 
 class HardHypergridRewardModule(GeneralHypergridRewardModule):
-    def __init__(self, side: int) -> None:
+    def __init__(self, *, side: int) -> None:
         super().__init__(side=side, R0=1e-4, R1=1.0, R2=3.0)

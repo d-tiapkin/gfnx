@@ -235,9 +235,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         log_flow_traj = log_flow_traj.at[:, 1:].set(
             jnp.where(done_mask, current_log_rewards[:, jnp.newaxis], log_flow_traj[:, 1:])
         )
-        log_flow_traj = log_flow_traj.at[:, 1:].set(
-            jnp.where(valid, log_flow_traj[:, 1:], 0.0)
-        )
+        log_flow_traj = log_flow_traj.at[:, 1:].set(jnp.where(valid, log_flow_traj[:, 1:], 0.0))
 
         def process_one_traj(log_pf, log_pb, log_flow, done, pad):
             def process_pair_idx(i, j, log_pf, log_pb, log_flow, done, pad):
@@ -401,7 +399,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     policy_static = eqx.filter(model, eqx.is_array, inverse=True)
 
     def bwd_policy_fn(
-            rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
+        rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
     ) -> tuple[chex.Array, dict]:
         del rng_key
         policy = eqx.combine(policy_params, policy_static)
@@ -470,12 +468,8 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     if cfg.logging.use_writer:
         log.info("Initialize writer")
-        log_dir = (
-            cfg.logging.log_dir
-            if cfg.logging.log_dir
-            else os.path.join(
-                hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
-            )
+        log_dir = cfg.logging.log_dir or os.path.join(
+            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
         )
         writer.init(
             writer_type=cfg.writer.writer_type,
@@ -491,13 +485,9 @@ def run_experiment(cfg: OmegaConf) -> None:
     final_train_state = gfnx.utils.run_training_loop(
         train_step, train_state, cfg.num_train_steps, cfg.logging["tqdm_print_rate"]
     )
-    dir = (
-        cfg.logging.checkpoint_dir
-        if cfg.logging.checkpoint_dir
-        else os.path.join(
-            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
-            f"checkpoints_{os.getpid()}/",
-        )
+    dir = cfg.logging.checkpoint_dir or os.path.join(
+        hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
+        f"checkpoints_{os.getpid()}/",
     )
     save_checkpoint(os.path.join(dir, "model"), final_train_state.model)
 

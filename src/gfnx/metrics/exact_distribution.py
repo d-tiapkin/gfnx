@@ -287,9 +287,7 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
             fwd_policy_logits, _ = jax.vmap(
                 lambda key, obs: self.fwd_policy_fn(key, obs, policy_params)
             )(jax.random.split(subkey, self.batch_size), obs_batch)
-            fwd_policy_probs = jax.nn.softmax(
-                fwd_policy_logits, axis=-1, where=action_mask_batch
-            )
+            fwd_policy_probs = jax.nn.softmax(fwd_policy_logits, axis=-1, where=action_mask_batch)
             return rng_key, fwd_policy_probs
 
         _, batched_fwd_policy_probs = jax.lax.scan(

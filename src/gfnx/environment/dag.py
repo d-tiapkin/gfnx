@@ -220,9 +220,7 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
         would not create a cycle. The stop action (last entry) is always valid.
         """
         invalid = jnp.logical_or(state.adjacency_matrix, state.closure_T).reshape(-1)
-        return jnp.concatenate(
-            [jnp.logical_not(invalid), jnp.ones((1,), dtype=jnp.bool)], axis=0
-        )
+        return jnp.concatenate([jnp.logical_not(invalid), jnp.ones((1,), dtype=jnp.bool)], axis=0)
 
     def get_backward_action_mask(self, state: EnvState, _params: EnvParams) -> chex.Array:
         """Valid backward-action mask (single state). [N*N+1].

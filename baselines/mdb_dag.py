@@ -362,9 +362,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         # Compute the forward log-probs
         fwd_logits = policy_outputs["forward_logits"]
         action_mask = env.get_action_mask_batch(transitions.state, env_params)
-        fwd_all_log_probs = jax.nn.log_softmax(
-            fwd_logits, where=action_mask, axis=-1
-        )
+        fwd_all_log_probs = jax.nn.log_softmax(fwd_logits, where=action_mask, axis=-1)
         sink_logprobs = fwd_all_log_probs[:, -1]
         fwd_logprobs = jnp.take_along_axis(
             fwd_all_log_probs,
@@ -389,8 +387,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             bwd_logits, bwd_actions, next_backward_action_mask
         )
         delta_score = jax.vmap(
-            train_state.reward_module.delta_score,
-            in_axes=(0, 0, 0, None, None)
+            train_state.reward_module.delta_score, in_axes=(0, 0, 0, None, None)
         )(
             transitions.state,
             transitions.action,
@@ -403,7 +400,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         active = transitions.valid & jnp.logical_not(transitions.done)
         error = next_sink_logprobs + fwd_logprobs - sink_logprobs - bwd_logprobs - delta_score
         error = jnp.where(active, error, 0.0)
-        return optax.huber_loss(error).sum() / active.sum()
+        return optax.huber_loss(error).sum() / jnp.maximum(active.sum(), 1)
 
     mean_loss, grads = eqx.filter_value_and_grad(loss_fn)(train_state.model)
     # Step 3. Update the model with grads
@@ -629,7 +626,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     def markov_blanket_transform_fn(
         env_state: gfnx.DAGEnvState, log_score: chex.Array
     ) -> chex.Array:
-        markov_blanket = jax.vmap(lambda x: get_markov_blanket(x), in_axes=0)(
+        markov_blanket = jax.vmap(get_markov_blanket, in_axes=0)(
             env_state.adjacency_matrix
         )  # (num_graphs, num_variables, num_variables)
         eye = jnp.eye(env_state.adjacency_matrix.shape[1], dtype=jnp.bool)[None, :, :]
@@ -742,12 +739,8 @@ def run_experiment(cfg: OmegaConf) -> None:
     )
     if cfg.logging.use_writer:
         log.info("Initialize writer")
-        log_dir = (
-            cfg.logging.log_dir
-            if cfg.logging.log_dir
-            else os.path.join(
-                hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
-            )
+        log_dir = cfg.logging.log_dir or os.path.join(
+            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
         )
         writer.init(
             writer_type=cfg.writer.writer_type,
@@ -763,13 +756,9 @@ def run_experiment(cfg: OmegaConf) -> None:
     train_state = gfnx.utils.run_training_loop(
         train_step, train_state, cfg.num_train_steps, cfg.logging["tqdm_print_rate"]
     )
-    dir = (
-        cfg.logging.checkpoint_dir
-        if cfg.logging.checkpoint_dir
-        else os.path.join(
-            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
-            f"checkpoints_{os.getpid()}/",
-        )
+    dir = cfg.logging.checkpoint_dir or os.path.join(
+        hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
+        f"checkpoints_{os.getpid()}/",
     )
     save_checkpoint(os.path.join(dir, "train_state"), train_state)
 

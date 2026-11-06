@@ -29,15 +29,16 @@ Both modules return a dictionary with keys `mean_reward`, `reward_delta`, and
 
 | Key | Meaning |
 | --- | --- |
-| `mean_reward` | Empirical mean of the collected rewards (use log rewards or linear rewards consistently). |
-| `reward_delta` | Absolute difference between empirical and ground-truth means in the same scale. |
+| `mean_reward` | Empirical mean of the collected linear-scale rewards. |
+| `reward_delta` | Absolute difference between the empirical and ground-truth means. |
 | `rel_reward_delta` | Relative error (absolute delta divided by ground-truth mean). |
 
 ## Inputs
 
 - `env`, `env_params`: used during construction to query the ground-truth mean.
-- arrays of sampled rewards in the scale you want to monitor (log rewards or
-  linear rewards both work, as long as you stay consistent).
+- arrays of sampled **linear-scale** rewards (e.g. `jnp.exp(log_rewards)`). The
+  ground truth is `E_{x ~ R/Z}[R(x)] = sum R^2 / sum R`, computed in linear
+  space, so log rewards give a meaningless delta.
 - an optional `buffer_size` for the sliding window metric.
 
 ## Quick start
@@ -62,8 +63,8 @@ mean_metric = gfnx.metrics.ExpectedRewardMetricsModule(
 state = mean_metric.init(jax.random.PRNGKey(1), mean_metric.InitArgs())
 
 # During training: accumulate rewards from rollouts.
-# `UpdateArgs.rewards` accepts whichever scale you collect (log or linear);
-# stay consistent so deltas remain meaningful.
+# `UpdateArgs.rewards` must be linear-scale rewards (e.g. `jnp.exp(log_rewards)`):
+# the ground truth is E_{x ~ R/Z}[R(x)], so log rewards give a meaningless delta.
 state = mean_metric.update(
     state,
     jax.random.PRNGKey(2),

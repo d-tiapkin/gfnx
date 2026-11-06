@@ -281,9 +281,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         transitions.next_state,
         train_state.env_params,
     )
-    delta_score = jax.vmap(train_state.reward_module.delta_score)(
-        transitions.next_state
-    )
+    delta_score = jax.vmap(train_state.reward_module.delta_score)(transitions.next_state)
     # Compute rewards for terminal states (for logging purposes)
     log_rewards = jax.vmap(train_state.reward_module.log_reward, in_axes=(0, None))(
         final_states, train_state.reward_params
@@ -531,12 +529,8 @@ def run_experiment(cfg: OmegaConf) -> None:
     )
     if cfg.logging.use_writer:
         log.info("Initialize writer")
-        log_dir = (
-            cfg.logging.log_dir
-            if cfg.logging.log_dir
-            else os.path.join(
-                hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
-            )
+        log_dir = cfg.logging.log_dir or os.path.join(
+            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
         )
         writer.init(
             writer_type=cfg.writer.writer_type,
@@ -552,13 +546,9 @@ def run_experiment(cfg: OmegaConf) -> None:
     train_state = gfnx.utils.run_training_loop(
         train_step, train_state, cfg.num_train_steps, cfg.logging.tqdm_print_rate
     )
-    dir = (
-        cfg.logging.checkpoint_dir
-        if cfg.logging.checkpoint_dir
-        else os.path.join(
-            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
-            f"checkpoints_{os.getpid()}/",
-        )
+    dir = cfg.logging.checkpoint_dir or os.path.join(
+        hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
+        f"checkpoints_{os.getpid()}/",
     )
     save_checkpoint(os.path.join(dir, "train_state"), train_state)
     save_checkpoint(os.path.join(dir, "model"), train_state.model)

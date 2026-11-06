@@ -172,7 +172,8 @@ def run_experiment(cfg: OmegaConf) -> None:
         batch_size=cfg.metrics.batch_size,
     )
 
-    # Canonical reward_params for metrics init (same for all seeds)
+    # Single reward_params shared by every seed, so that the metrics' target
+    # distribution matches the reward each seed trains on.
     canonical_reward_params = reward_module.init(env_init_key, env.reset())
     init_metrics_state = metrics_module.init(
         jax.random.key(0),
@@ -188,7 +189,7 @@ def run_experiment(cfg: OmegaConf) -> None:
     # -------------------------------------------------------------------------
     def make_init_params(seed: chex.Array) -> TrainStateParams:
         rng_key = jax.random.PRNGKey(seed)
-        rng_key, net_key, reward_key = jax.random.split(rng_key, 3)
+        rng_key, net_key, _ = jax.random.split(rng_key, 3)
         model = MLPPolicy(
             input_size=env.observation_space.shape[0],
             n_fwd_actions=env.action_space.n,
@@ -200,7 +201,7 @@ def run_experiment(cfg: OmegaConf) -> None:
         )
         model_params = eqx.filter(model, eqx.is_array)
         logZ = jnp.array(0.0)
-        reward_params = reward_module.init(reward_key, env.reset())
+        reward_params = canonical_reward_params
         opt_state = optimizer.init({"model_params": model_params, "logZ": template_logZ})
         return TrainStateParams(
             rng_key=rng_key,
@@ -361,10 +362,11 @@ def run_experiment(cfg: OmegaConf) -> None:
     # Log metric history and save per-metric CSVs
     # -------------------------------------------------------------------------
     seed_cols = [f"seed_{i}" for i in range(cfg.num_seeds)]
+    out_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
     log.info("=== Metric history (mean ± std over seeds) ===")
     for key, values in all_histories.items():
         log.info(f"--- {key} ---")
-        csv_path = Path(f"{key}.csv")
+        csv_path = out_dir / f"{key}.csv"
         with csv_path.open("w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["step"] + seed_cols)

@@ -1,6 +1,5 @@
 import functools
 
-import equinox as eqx
 import jax
 from jax_tqdm import loop_tqdm
 
@@ -17,6 +16,8 @@ def run_training_loop(train_step_fn, init_state, num_steps: int, tqdm_print_rate
     Returns:
         Final training state (same type as init_state).
     """
+    import equinox as eqx  # lazy: equinox is an optional (baselines) dependency
+
     params, static = eqx.partition(init_state, eqx.is_array)
 
     @functools.partial(jax.jit, donate_argnums=(1,))

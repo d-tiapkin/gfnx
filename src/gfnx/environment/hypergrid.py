@@ -238,6 +238,9 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> chex.Array:
         """Returns the reward for all states in the hypergrid."""
+        reward_side = getattr(reward_module, "side", self.side)
+        if reward_side != self.side:
+            raise ValueError(f"reward_module.side={reward_side} != environment side={self.side}")
         rewards = jnp.zeros((self.side,) * self.dim, dtype=jnp.float32)
 
         def update_rewards(idx: int, rewards: chex.Array):

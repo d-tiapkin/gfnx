@@ -49,7 +49,7 @@ class ExpectedRewardMetricsModule(BaseMetricsModule):
         env: TEnvironment,
         env_params: TEnvParams,
         reward_module: TRewardModule,
-        reward_params: TRewardParams
+        reward_params: TRewardParams,
     ):
         """Initialize the mean reward metric module.
 
@@ -95,9 +95,8 @@ class ExpectedRewardMetricsModule(BaseMetricsModule):
         """Arguments for updating the ExpectedRewardMetricsModule.
 
         Attributes:
-            log_rewards: Array of log-reward values to add to the running statistics.
-                These are expected to be in log space and will be converted to
-                linear space for mean computation.
+            rewards: Array of linear-scale reward values (e.g. ``jnp.exp(log_rewards)``)
+                to add to the running statistics.
         """
 
         rewards: chex.Array
@@ -208,7 +207,7 @@ class SWExpectedRewardMetricsModule(BaseMetricsModule):
         env_params: TEnvParams,
         reward_module: TRewardModule,
         reward_params: TRewardParams,
-        buffer_size: int
+        buffer_size: int,
     ):
         """Initialize the sliding window mean reward metric module.
 

@@ -211,9 +211,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
         log_flow_traj = log_flow_traj.at[:, 1:].set(
             jnp.where(done_mask, current_log_rewards[:, jnp.newaxis], log_flow_traj[:, 1:])
         )
-        log_flow_traj = log_flow_traj.at[:, 1:].set(
-            jnp.where(valid, log_flow_traj[:, 1:], 0.0)
-        )
+        log_flow_traj = log_flow_traj.at[:, 1:].set(jnp.where(valid, log_flow_traj[:, 1:], 0.0))
 
         def process_one_traj(log_pf, log_pb, log_flow, done, pad):
             def process_pair_idx(i, j, log_pf, log_pb, log_flow, done, pad):
@@ -261,10 +259,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
     new_model = eqx.apply_updates(train_state.model, updates)
 
     # Perform all the required logging
+    rng_key, eval_rng_key = jax.random.split(rng_key)
     metrics_state, eval_info = train_state.metrics_module.step(
         idx=idx,
         metrics_state=train_state.metrics_state,
-        rng_key=jax.random.key(0),
+        rng_key=eval_rng_key,
         update_args=train_state.metrics_module.UpdateArgs(states=final_states),
         process_args=train_state.metrics_module.ProcessArgs(env_params=env_params),
         eval_each=train_state.config.logging.eval_each,
@@ -289,7 +288,7 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
             log.info({
                 key: float(value)
                 for key, value in eval_info.items()
-                if key not in ["eval/2d_marginal_distribution"]
+                if key != "eval/2d_marginal_distribution"
             })
             if cfg.logging.use_writer:
                 marginal_dist = eval_info["eval/2d_marginal_distribution"]
@@ -405,12 +404,8 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     if cfg.logging.use_writer:
         log.info("Initialize writer")
-        log_dir = (
-            cfg.logging.log_dir
-            if cfg.logging.log_dir
-            else os.path.join(
-                hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
-            )
+        log_dir = cfg.logging.log_dir or os.path.join(
+            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, f"run_{os.getpid()}/"
         )
         writer.init(
             writer_type=cfg.writer.writer_type,
@@ -426,13 +421,9 @@ def run_experiment(cfg: OmegaConf) -> None:
     final_train_state = gfnx.utils.run_training_loop(
         train_step, train_state, cfg.num_train_steps, cfg.logging["tqdm_print_rate"]
     )
-    dir = (
-        cfg.logging.checkpoint_dir
-        if cfg.logging.checkpoint_dir
-        else os.path.join(
-            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
-            f"checkpoints_{os.getpid()}/",
-        )
+    dir = cfg.logging.checkpoint_dir or os.path.join(
+        hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
+        f"checkpoints_{os.getpid()}/",
     )
     save_checkpoint(os.path.join(dir, "model"), final_train_state.model)
 

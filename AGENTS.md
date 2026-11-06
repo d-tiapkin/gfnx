@@ -118,10 +118,10 @@ Key methods (all single-instance):
 
 Enumerable environments additionally implement:
 `get_all_states`, `state_to_index`, `get_true_distribution`, `get_empirical_distribution`,
-`get_expected_reward`, `get_normalizing_constant`, `get_ground_truth_sampling`.
+`get_expected_reward`, `get_normalizing_constant` / `get_log_normalizing_constant`, `get_ground_truth_sampling`.
 These methods accept `reward_module, reward_params` as explicit arguments.
 
-### `BaseRewardModule[TEnvState, TRewardParams]`
+### `BaseRewardModule[TEnvState, TEnvParams, TRewardParams]`
 Abstract base for reward functions. **Fully decoupled from environments**. Operates on **single states** — use `jax.vmap` for batches.
 
 | Method | Signature | Notes |
@@ -436,8 +436,8 @@ params_for_loss = {"model_params": policy_params, "logZ": logZ}
 | TB | `tb_hypergrid.py` | `(logZ + Σlog_pf − Σlog_pb − log_R)²` |
 | DB | `db_hypergrid.py` | `(log_pf + log_F − log_pb − log_F_next)²` per transition; uses `log_R` at terminal |
 | SubTB | `subtb_hypergrid.py` | Weighted sum over sub-trajectories; λ=0.9 |
-| FLDB | `fldb_phylo.py` | `(log F̃(s)P_F − log F̃(s')P_B + E(s')−E(s))²`; delta_score via `reward_module.delta_score(state, action, next_state, env_params, reward_params)` |
-| MDB | `mdb_dag.py` | DB with delta-score for modular rewards; per-edge update |
+| FLDB | `fldb_phylo.py` | `(log F̃(s)P_F − log F̃(s')P_B + E(s')−E(s))²`; delta_score via `reward_module.delta_score(next_state)` |
+| MDB | `mdb_dag.py` | DB with delta-score for modular rewards; per-edge update via `reward_module.delta_score(state, action, next_state, env_params, reward_params)` |
 
 ### Multi-seed vmap scripts
 

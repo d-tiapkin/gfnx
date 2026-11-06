@@ -45,7 +45,7 @@ def adj_to_index(adj: chex.Array, all_adjacencies_flat_bits: chex.Array) -> chex
 
 
 # TODO: (agarkovv) Make jit compatible
-def construct_all_dags(num_variables : int) -> chex.Array:
+def construct_all_dags(num_variables: int) -> chex.Array:
     """
     Return all possible adjacency matrices for DAGs with a given number of variables
     Shape: (num_graphs, num_variables, num_variables)

@@ -101,8 +101,7 @@ def test_baseline_smoke(script, extra, tmp_path):
         cwd=REPO_ROOT,
     )
     assert result.returncode == 0, (
-        f"{script} failed (exit {result.returncode})\n"
-        f"--- STDERR ---\n{result.stderr[-3000:]}"
+        f"{script} failed (exit {result.returncode})\n--- STDERR ---\n{result.stderr[-3000:]}"
     )
 
 
@@ -122,8 +121,7 @@ def test_multiseed_baseline_smoke(script, extra, tmp_path):
         cwd=REPO_ROOT,
     )
     assert result.returncode == 0, (
-        f"{script} failed (exit {result.returncode})\n"
-        f"--- STDERR ---\n{result.stderr[-3000:]}"
+        f"{script} failed (exit {result.returncode})\n--- STDERR ---\n{result.stderr[-3000:]}"
     )
 
 
@@ -133,7 +131,7 @@ def phylo_data_dir():
     data_dir = REPO_ROOT / "datasets"
     if not (data_dir / "DS1.json").exists():
         pytest.skip(
-            "Phylogenetic datasets not found. Run `bash download_ds.sh` from the repo root" \
+            "Phylogenetic datasets not found. Run `bash download_ds.sh` from the repo root"
             " to download them."
         )
     return data_dir
@@ -158,6 +156,5 @@ def test_fldb_phylo_smoke(phylo_data_dir, tmp_path):
         timeout=600,
     )
     assert result.returncode == 0, (
-        f"fldb_phylo failed (exit {result.returncode})\n"
-        f"--- STDERR ---\n{result.stderr[-3000:]}"
+        f"fldb_phylo failed (exit {result.returncode})\n--- STDERR ---\n{result.stderr[-3000:]}"
     )

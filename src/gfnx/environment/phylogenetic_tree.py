@@ -7,13 +7,15 @@ import jax.numpy as jnp
 from .. import spaces
 from ..base import (
     BaseEnvironment,
+    BaseEnvParams,
+    BaseEnvState,
     TAction,
     TDone,
 )
 
 
 @chex.dataclass(frozen=True)
-class EnvState:
+class EnvState(BaseEnvState):
     sequences: chex.Array  # [2 * num_nodes - 1, sequence_length]
     left_child: chex.Array  # [2 * num_nodes - 1]
     right_child: chex.Array  # [2 * num_nodes - 1]
@@ -29,7 +31,7 @@ class EnvState:
 
 
 @chex.dataclass(frozen=True)
-class EnvParams:
+class EnvParams(BaseEnvParams):
     num_nodes: int
     sequence_length: int
     bits_per_seq_elem: int = 5
