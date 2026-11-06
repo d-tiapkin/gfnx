@@ -109,7 +109,14 @@ def parse_all_training_losses(stdout: str) -> list[float]:
 
 
 def test_training_metrics(training_result, training_paths):
-    """Verify that the minimum training loss over all eval checkpoints is below threshold."""
+    """Verify that the training loss at the end of training is below threshold.
+
+    Single checkpoint losses are noisy, so we take the median of the last
+    few checkpoints: robust to one noisy spike, but still fails if training
+    diverges late (unlike the minimum over all checkpoints).
+    """
+    import statistics
+
     from omegaconf import OmegaConf
 
     config_path = training_paths["config_dir"] / "test_subtb_hypergrid.yaml"
@@ -118,9 +125,10 @@ def test_training_metrics(training_result, training_paths):
 
     stdout = training_result.stdout
     all_losses = parse_all_training_losses(stdout)
-    min_loss = min(all_losses)
+    last_losses = all_losses[-3:]
+    final_loss = statistics.median(last_losses)
 
-    assert min_loss < loss_threshold, (
-        f"Minimum training loss {min_loss:.6e} over {len(all_losses)} checkpoints "
-        f"exceeds threshold {loss_threshold:.6e}"
+    assert final_loss < loss_threshold, (
+        f"Median training loss {final_loss:.6e} over the last {len(last_losses)} "
+        f"checkpoints {last_losses} exceeds threshold {loss_threshold:.6e}"
     )

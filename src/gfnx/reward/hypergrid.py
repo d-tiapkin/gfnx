@@ -17,10 +17,10 @@ class GeneralHypergridRewardModule(
 ):
     def __init__(
         self,
+        side: int,
         R0: float = 1e-3,
         R1: float = 0.5,
         R2: float = 2.0,
-        side: int = 20,
         min_reward: float = 1e-6,
     ) -> None:
         r"""
@@ -33,6 +33,9 @@ class GeneralHypergridRewardModule(
         Source: Madan, Kanika, et al. "Learning gflownets from partial episodes
         for improved convergence and stability."
         International Conference on Machine Learning. PMLR, 2023.
+
+        `side` must match the environment's `side` (H above); it has no default
+        so a mismatch with the environment cannot happen silently.
         """
         self.R0 = R0
         self.R1 = R1
@@ -58,10 +61,10 @@ class GeneralHypergridRewardModule(
 
 # Two specific use cases
 class EasyHypergridRewardModule(GeneralHypergridRewardModule):
-    def __init__(self, side: int = 20) -> None:
-        super().__init__(R0=1e-3, R1=0.5, R2=2.0, side=side)
+    def __init__(self, side: int) -> None:
+        super().__init__(side=side, R0=1e-3, R1=0.5, R2=2.0)
 
 
 class HardHypergridRewardModule(GeneralHypergridRewardModule):
-    def __init__(self, side: int = 20) -> None:
-        super().__init__(R0=1e-4, R1=1.0, R2=3.0, side=side)
+    def __init__(self, side: int) -> None:
+        super().__init__(side=side, R0=1e-4, R1=1.0, R2=3.0)

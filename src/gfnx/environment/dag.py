@@ -316,10 +316,16 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
         (softmax trick), since raw log rewards can be ~-100 and would
         otherwise underflow.
         """
-        all_dags = self.get_all_states(env_params)
-        log_reward = jax.vmap(reward_module.log_reward, in_axes=(0, None))(all_dags, reward_params)
+        log_reward = self._get_states_log_rewards(env_params, reward_module, reward_params)
         log_reward = log_reward - jnp.max(log_reward)  # softmax trick
         return jnp.exp(log_reward)
+
+    def _get_states_log_rewards(
+        self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
+    ) -> chex.Array:
+        """Returns unshifted log rewards for every DAG on `num_variables` nodes."""
+        all_dags = self.get_all_states(env_params)
+        return jax.vmap(reward_module.log_reward, in_axes=(0, None))(all_dags, reward_params)
 
     def get_true_distribution(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
@@ -346,8 +352,9 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
     def get_expected_reward(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> float:
-        rewards = self._get_states_rewards(env_params, reward_module, reward_params)
-        return jnp.pow(rewards, 2).sum() / rewards.sum()
+        # E_{x ~ R/Z}[R(x)] = sum R^2 / sum R, computed in log space
+        log_reward = self._get_states_log_rewards(env_params, reward_module, reward_params)
+        return jnp.exp(jax.nn.logsumexp(2 * log_reward) - jax.nn.logsumexp(log_reward))
 
     @property
     def is_normalizing_constant_tractable(self) -> bool:
@@ -356,5 +363,11 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
     def get_normalizing_constant(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> float:
-        rewards = self._get_states_rewards(env_params, reward_module, reward_params)
-        return rewards.sum()
+        return jnp.exp(self.get_log_normalizing_constant(env_params, reward_module, reward_params))
+
+    def get_log_normalizing_constant(
+        self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
+    ) -> float:
+        # Log space: raw DAG log rewards can be far below float32's exp range.
+        log_reward = self._get_states_log_rewards(env_params, reward_module, reward_params)
+        return jax.nn.logsumexp(log_reward)

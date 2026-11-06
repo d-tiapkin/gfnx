@@ -1,5 +1,6 @@
 from typing import ClassVar
 
+import jax
 import jax.numpy as jnp
 import matplotlib
 import matplotlib.colors as mcolors
@@ -7,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import patches
 
-from ..base import BaseRenderer, TAction
+from ..base import BaseRenderer, BaseRewardModule, TAction
 from ..environment.hypergrid import EnvParams, EnvState, HypergridEnvironment
 
 
@@ -39,12 +40,20 @@ class HypergridRenderer(BaseRenderer[EnvState]):
         env_params: EnvParams,
         dpi: float,
         color_map: str = "tab20b",
+        reward_module: BaseRewardModule | None = None,
+        reward_params=None,
     ):
-        """Initialize the HypergridRenderer."""
+        """Initialize the HypergridRenderer.
+
+        If ``reward_module`` is given, cells are shaded by reward; otherwise
+        the background grid is drawn without reward shading.
+        """
         assert env_params.dim in (1, 2), "Only 1D and 2D hypergrids are supported."
 
         self.env = env
         self.env_params = env_params
+        self.reward_module = reward_module
+        self.reward_params = reward_params
         self.dpi = dpi
         self.agent_artists: list[matplotlib.artist.Artist] = []
         self.trajectory_artists: list[matplotlib.artist.Artist] = []
@@ -206,7 +215,11 @@ class HypergridRenderer(BaseRenderer[EnvState]):
             is_pad=jnp.zeros((total_states,), dtype=jnp.bool),
         )
 
-        reward = self.env.reward_module.reward(dummy_state, self.env_params)
+        if self.reward_module is None:
+            return np.zeros(shape_tuple)
+        reward = jax.vmap(self.reward_module.reward, in_axes=(0, None))(
+            dummy_state, self.reward_params
+        )
         reward_grid = reward.reshape(shape_tuple)
 
         return np.array(reward_grid)

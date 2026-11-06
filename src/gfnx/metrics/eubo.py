@@ -84,9 +84,7 @@ class EUBOMetricsModule(BaseMetricsModule):
             sample_key, batch_size, env_params, reward_module, reward_params
         )
         if env.is_normalizing_constant_tractable:
-            self.logZ = jnp.log(
-                env.get_normalizing_constant(env_params, reward_module, reward_params)
-            )
+            self.logZ = env.get_log_normalizing_constant(env_params, reward_module, reward_params)
         else:
             self.logZ = jnp.array(0.0)
         self.bwd_policy_fn = bwd_policy_fn

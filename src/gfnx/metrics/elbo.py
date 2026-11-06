@@ -76,9 +76,7 @@ class ELBOMetricsModule(BaseMetricsModule):
         self.env = env
         self.reward_module = reward_module
         if env.is_normalizing_constant_tractable:
-            self.logZ = jnp.log(
-                env.get_normalizing_constant(env_params, reward_module, reward_params)
-            )
+            self.logZ = env.get_log_normalizing_constant(env_params, reward_module, reward_params)
         else:
             self.logZ = jnp.array(0.0)
         self.fwd_policy_fn = fwd_policy_fn

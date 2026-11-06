@@ -62,7 +62,7 @@ class BaseDAGPrior(Generic[TDAGPriorParams]):
 
     @staticmethod
     def num_parents(state: DAGEnvState) -> chex.Array:
-        return jnp.count_nonzero(state.adjacency_matrix, axis=1)
+        return jnp.count_nonzero(state.adjacency_matrix, axis=0)
 
 
 class UniformDAGPrior(BaseDAGPrior[BaseDAGPriorParams]):

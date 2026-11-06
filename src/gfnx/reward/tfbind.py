@@ -65,7 +65,8 @@ class TFBind8RewardModule(
             self.nchar ** (self.max_length - i - 1) for i in range(self.max_length)
         ])
         index = jnp.sum(state.tokens * powers_array)
-        return reward_params.rewards[index]
+        # Out-of-range indices (e.g. from PAD tokens) get min_reward, not a clamped entry
+        return reward_params.rewards.at[index].get(mode="fill", fill_value=self.min_reward)
 
     def log_reward(self, state: TFBind8EnvState, reward_params: TFBind8RewardParams) -> TLogReward:
         return jnp.log(self.reward(state, reward_params))

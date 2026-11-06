@@ -140,6 +140,11 @@ def run_experiment(cfg: OmegaConf) -> None:
     # -------------------------------------------------------------------------
     # Metrics setup — ExactDistributionMetricsModule (no replay buffer needed)
     # -------------------------------------------------------------------------
+    if cfg.num_evals <= 0 or cfg.num_train_steps % cfg.num_evals != 0:
+        raise ValueError(
+            f"num_train_steps ({cfg.num_train_steps}) must be a positive multiple of "
+            f"num_evals ({cfg.num_evals}); otherwise the remainder steps are never run"
+        )
     steps_per_eval = cfg.num_train_steps // cfg.num_evals
 
     # Forward policy function for exact distribution computation (uses closure)

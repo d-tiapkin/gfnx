@@ -128,7 +128,8 @@ class BaseEnvironment(ABC, Generic[TEnvState, TEnvParams]):
     ) -> tuple[TObs, TEnvState, TDone, dict[Any, Any]]:
         """Single-environment forward transition. Not batched.
 
-        Returns `(next_state, done, info)`, where `done` is a bool array.
+        Returns `(obs, next_state, done, info)`, where `obs` is the observation of
+        `next_state` and `done` is a bool array.
         """
         raise NotImplementedError
 
@@ -335,6 +336,17 @@ class BaseEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         if not self.is_normalizing_constant_tractable:
             raise ValueError(f"Normalizing constant for environment {self.name} is not tractable")
         raise NotImplementedError
+
+    def get_log_normalizing_constant(
+        self, env_params: TEnvParams, reward_module: TRewardModule, reward_params: TRewardParams
+    ) -> float:
+        """Returns log Z, the log of the sum of rewards over all terminal states.
+
+        Defaults to ``log(get_normalizing_constant(...))``. Environments whose
+        rewards can underflow in float32 should override it with a log-space
+        computation.
+        """
+        return jnp.log(self.get_normalizing_constant(env_params, reward_module, reward_params))
 
     @property
     def is_ground_truth_sampling_tractable(self) -> bool:
