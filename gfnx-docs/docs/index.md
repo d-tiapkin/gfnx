@@ -107,6 +107,7 @@ For more context, continue with:
 - [Environments](environments/index.md)
 - [Metrics](metrics/index.md)
 - [Baselines](baselines.md)
+- [Migrating from 0.0.x](migration.md)
 
 ## Support
 

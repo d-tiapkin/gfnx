@@ -4,7 +4,7 @@
        <a href="https://www.python.org/doc/versions/">
         <img src="https://img.shields.io/badge/python-3.12--3.14-blue" /></a>
        <a href="https://pypi.org/project/gfnx/">
-        <img src="https://img.shields.io/badge/pypi_package-0.0.1-brightgreen" /></a>
+        <img src="https://img.shields.io/badge/pypi_package-0.1.0-brightgreen" /></a>
        <a href="https://arxiv.org/abs/2511.16592">
         <img src="https://img.shields.io/badge/arXiv-2511.16592-b31b1b" /></a>
        <a href="https://gfnx.readthedocs.io/en/latest/">
@@ -75,6 +75,10 @@ python baselines/db_hypergrid.py num_train_steps=1_000 logging.tqdm_print_rate=1
 ```
 
 The script is powered by Hydra, so you can override any configuration value on the command line (for example, picking another logging backend or playing with hyperparameters of the method). Baseline outputs, checkpoints, and Hydra logs default to `tmp/<date>/<time>/`; point the `logging.log_dir` or `logging.checkpoint_dir` fields to custom paths when running longer experiments.
+
+## Upgrading from 0.0.x
+
+Version 0.1.0 decouples rewards from environments, makes all environment primitives single-state (batch with `jax.vmap`), and requires Python 3.12+ with numpy 2. Old code will not run unchanged. See the [migration guide](gfnx-docs/docs/migration.md) for an old-call → new-call table.
 
 ## Support
 
