@@ -1,6 +1,6 @@
-# Migrating from 0.0.x to 0.1.0
+# Migrating from 0.0.1
 
-`gfnx` 0.1.0 decouples rewards from environments and moves every environment
+The reward-decoupling refactor ([#5](https://github.com/d-tiapkin/gfnx/pull/5)) decouples rewards from environments and moves every environment
 primitive to **single states** (no batch dimension). Batching is done with
 `jax.vmap` by the caller. Most of the changes below follow from these two
 decisions.
@@ -8,7 +8,7 @@ decisions.
 ## At a glance
 
 ```python
-# 0.0.x
+# 0.0.1
 reward_module = gfnx.EasyHypergridRewardModule()
 env = gfnx.HypergridEnvironment(reward_module, dim=4, side=20)
 env_params = env.init(key)  # also initialised reward params inside env_params
@@ -17,7 +17,7 @@ traj_data, info = gfnx.utils.forward_rollout(
 )
 log_rewards = info["log_gfn_reward"]
 
-# 0.1.0
+# current
 reward_module = gfnx.EasyHypergridRewardModule(side=20)
 env = gfnx.HypergridEnvironment(dim=4, side=20)
 env_params = env.init(env_key)                               # dynamics only
@@ -30,7 +30,7 @@ log_rewards = jax.vmap(reward_module.log_reward, in_axes=(0, None))(final_states
 
 ## Environments
 
-| 0.0.x | 0.1.0 |
+| 0.0.1 | Current |
 |-------|-------|
 | `HypergridEnvironment(reward_module, dim=..., side=...)` (same for every environment) | `HypergridEnvironment(dim=..., side=...)`: constructors no longer take `reward_module` |
 | `env.init(key)` also initialised the reward; `env_params.reward_params` | `env.init(key)` returns dynamics params only; call `reward_module.init(key, env.reset())` and keep `reward_params` yourself. `BaseEnvParams.reward_params` is gone |
@@ -51,7 +51,7 @@ The mask flip is the easiest change to miss: anything that did
 
 ## Rewards
 
-| 0.0.x | 0.1.0 |
+| 0.0.1 | Current |
 |-------|-------|
 | `reward_module.log_reward(states, env_params)` (batched) | `reward_module.log_reward(state, reward_params)` (single state); batch with `jax.vmap(reward_module.log_reward, in_axes=(0, None))(states, reward_params)` |
 | `reward_module.init(key, batch_of_dummy_states)` | `reward_module.init(key, env.reset())`: a single dummy state; returns a `*RewardParams` dataclass (e.g. `HypergridRewardParams`, `TFBind8RewardParams`) |
@@ -60,7 +60,7 @@ The mask flip is the easiest change to miss: anything that did
 
 ## Rollouts and masking utilities
 
-| 0.0.x | 0.1.0 |
+| 0.0.1 | Current |
 |-------|-------|
 | `traj_data, info = forward_rollout(key, num_envs, policy_fn, params, env, env_params)` | `traj_data, final_state, info = forward_rollout(key, policy_fn, params, env, env_params)`: one trajectory `[T+1, ...]`; `jax.vmap` over split keys for `[B, T+1, ...]` |
 | `info["final_env_state"]` | The second return value, `final_state` |
@@ -74,7 +74,7 @@ The mask flip is the easiest change to miss: anything that did
 
 ## Metrics
 
-| 0.0.x | 0.1.0 |
+| 0.0.1 | Current |
 |-------|-------|
 | `MeanRewardMetricsModule`, `MeanRewardMetricsState` | `ExpectedRewardMetricsModule`, `ExpectedRewardMetricsState` |
 | `SWMeanRewardSWMetricsModule`, `SWMeanRewardMetricsState` | `SWExpectedRewardMetricsModule`, `SWExpectedRewardMetricsState` |
