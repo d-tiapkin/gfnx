@@ -20,9 +20,21 @@ gfnx/
 │   ├── utils/             # rollout.py, masking.py, training.py, exploration helpers, misc
 │   └── visualize/         # Matplotlib visualizations
 ├── baselines/             # 20 self-contained training scripts + Hydra configs
+│   └── utils/             # checkpoint.py, logger.py, config.py (FrozenConfig)
 ├── proxy/                 # Proxy reward model training pipeline
 └── tests/                 # Test suite
 ```
+
+**Supported versions**: Python 3.11–3.14 (`requires-python = ">=3.11"`), numpy ≥ 2.0,
+jax/jaxlib `>=0.10.0,<0.13.0`. jax 0.10 is the first release requiring numpy 2 and the floor
+sets the Python floor (jax ≥ 0.7 dropped 3.10; jax ≥ 0.11 needs 3.12, so 3.11 resolves to jax
+0.10.x). CI tests environments on 3.11–3.14 and baselines on 3.11 and 3.14.
+- **Hydra on 3.14**: hydra-core 1.3.x crashes at startup on Python 3.14 (argparse rejects its
+  help strings), so the `baselines` extra requires `hydra-core>=1.4.0rc3` there (a release
+  candidate) via a `python_version` marker. It pulls in omegaconf 2.4, where `DictConfig` is
+  unhashable — see `FrozenConfig` below.
+- **Python 3.15** is blocked upstream: `flashbax` needs `tensorstore`, which has no cp315 wheels
+  yet and does not build from source.
 
 **Design philosophy**: follows CleanRL's "single-file" approach — each baseline is a self-contained, hackable script. Full end-to-end JIT compilation in the style of purejaxrl.
 
@@ -380,6 +392,12 @@ def policy_fn(rng_key, env_obs, policy_params) -> (logits: Array[n_actions], inf
    `reward_module` ends up in the static partition of `eqx.partition(train_state, eqx.is_array)`;
    `reward_params` ends up in the dynamic partition.
 
+   `config` is `freeze_config(cfg)` (`baselines/utils/config.py`), not the Hydra `DictConfig`:
+   static leaves of the state must be hashable, and `DictConfig` is not under omegaconf 2.4.
+   `FrozenConfig` is an immutable, hashable mapping with the same attribute/item access
+   (`train_state.config.logging.eval_each`); lists become tuples. Keep using the raw `cfg`
+   outside `TrainState` (e.g. `OmegaConf.to_yaml(cfg)`, writer setup).
+
 3. **`train_step(idx, train_state) -> TrainState`** — decorated with `@eqx.filter_jit`:
    - Split model: `policy_params, policy_static = eqx.partition(model, eqx.is_array)`
    - Rollout (vmapped single-env): `traj_data, final_states, info = jax.vmap(lambda rng: forward_rollout(rng, ...))(rng_keys)`
@@ -583,6 +601,8 @@ Key insight: gfnx runs the full training pipeline (including environment) end-to
 - **`split_traj_to_transitions` is single-trajectory** — apply `jax.vmap(split_traj_to_transitions)(traj_data)` to get `[B, T, ...]`, then flatten to `[B*T, ...]` with `jax.tree.map(lambda x: x.reshape((-1,) + x.shape[2:]), ...)`.
 - **`jax.debug.callback` does not work inside `jax.vmap`** — do not use it in training loops intended to be vmapped over seeds.
 - **Equinox `eqx.partition`** splits a pytree into `(arrays, static)`. The static part must be shared / hashable. The dynamic arrays part is what gets vmapped/JIT'd.
+- **Never put a `DictConfig` in `TrainState`** — with omegaconf 2.4 `eqx.filter_jit` fails with "Non-hashable static arguments are not supported ... unhashable type: 'DictConfig'". Store `freeze_config(cfg)` instead (see `baselines/utils/config.py`).
+- **Smoke tests call a bare `python`** (`tests/baselines/test_baselines_smoke.py`, `test_subtb_hypergrid.py`) — put the target env's `bin/` first on `PATH` when running them against a specific interpreter.
 - **`jax.lax.fori_loop` and `jax.lax.scan` ARE vmappable** — use either as the loop primitive in multi-seed training. Single-seed baselines use `fori_loop` (via `run_training_loop`); multi-seed scripts use `scan` for structured eval/train epochs.
 - **Reward is computed once per rollout**, not per step — `jax.vmap(reward_module.log_reward, in_axes=(0, None))(final_states, reward_params)` is called after `forward_rollout` returns, on the batch of terminal states.
 - **`reward_params` must NOT be stored as a class field on metrics modules** — they can be large (e.g. full TFBind8 table) or trainable (Ising J matrix). Pass via `ProcessArgs` at each evaluation call instead.

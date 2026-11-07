@@ -10,11 +10,11 @@ sources = ["src"]
 name = "gfnx"
 version = "0.0.1"
 dependencies = [
-  "jax>=0.4.27.0,<0.10.0",
-  "jaxlib>=0.4.27.0,<0.10.0",
+  "jax>=0.10.0,<0.13.0",
+  "jaxlib>=0.10.0,<0.13.0",
   "chex",
   "flashbax",
-  "numpy==1.26.4",
+  "numpy>=2.0",
   "jax_tqdm",
   "jaxtyping",
   "networkx",
@@ -33,9 +33,14 @@ authors = [
 license = "MIT"
 description = "Environments for Generative Flow Networks in JAX"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
 ]
 
@@ -46,13 +51,16 @@ baselines = [
   "flashbax",
   "wandb",
   "orbax-checkpoint",
-  "hydra-core",
+  # hydra-core 1.3.x crashes at startup on Python 3.14 (argparse rejects its help strings);
+  # 1.4.0rc3 (a release candidate) works. Drop the split once 1.4.0 is final.
+  "hydra-core>=1.3.2; python_version < '3.14'",
+  "hydra-core>=1.4.0rc3; python_version >= '3.14'",
   "jax_tqdm",
   "pillow",
   "jraph"
 ]
 cuda12 = [
-  "jax[cuda12]>=0.4.27.0,<0.10.0",
+  "jax[cuda12]>=0.10.0,<0.13.0",
 ]
 tests = [
   "pytest",
@@ -75,7 +83,7 @@ exclude = [
 ]
 line-length = 99
 indent-width = 4
-target-version = "py310"
+target-version = "py311"
 
 
 [tool.ruff.lint]
