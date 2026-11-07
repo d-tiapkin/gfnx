@@ -7,7 +7,7 @@ Mask convention used throughout this module (and the rest of the library):
 That is, a ``True`` entry means "count this element / consider this action /
 keep this step", while ``False`` means "ignore / mask out". This matches the
 semantics of ``jax.nn.{soft,log_soft}max(..., where=mask, axis=-1)`` and the
-``mask=`` argument accepted by :func:`masked_sum` / :func:`masked_mean` below.
+``mask=`` argument accepted by `masked_sum` / `masked_mean` below.
 """
 
 import chex

@@ -5,6 +5,10 @@ repo_url: https://github.com/d-tiapkin/gfnx
 repo_name: d-tiapkin/gfnx
 edit_uri: edit/main/gfnx-docs/docs/
 
+# Rebuild on docstring changes too when running `mkdocs serve`.
+watch:
+  - ../src
+
 theme:
   name: material
   features:

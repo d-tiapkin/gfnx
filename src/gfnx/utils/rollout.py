@@ -53,7 +53,7 @@ class TrajectoryData:
     def valid(self) -> Bool[Array, " time"]:
         """Boolean mask over the time axis: ``True`` for real (non-padding) steps.
 
-        Complement of :attr:`pad`; provided for direct use with ``masked_sum``
+        Complement of `pad`; provided for direct use with ``masked_sum``
         / ``masked_mean`` and JAX ops that accept ``where=`` (``True`` = include).
         """
         return jnp.logical_not(self.pad)
@@ -88,7 +88,7 @@ class TransitionData:
     def valid(self) -> Bool[Array, " transitions"]:
         """Boolean mask over the time axis: ``True`` for real (non-padding) transitions.
 
-        Complement of :attr:`pad`; provided for direct use with ``masked_sum``
+        Complement of `pad`; provided for direct use with ``masked_sum``
         / ``masked_mean`` and JAX ops that accept ``where=`` (``True`` = include).
         """
         return jnp.logical_not(self.pad)
@@ -217,7 +217,7 @@ def _generic_rollout(
         step_fn: Function with signature
             `step_fn(env_state, action, env_params) -> tuple[TObs, TEnvState, Bool, dict]`.
         action_mask_fn: Function producing the action mask for the current
-            state (``True`` = valid action; see :meth:`BaseEnvironment.get_action_mask`).
+            state (``True`` = valid action; see `BaseEnvironment.get_action_mask`).
 
     Returns:
         A `(TrajectoryData, final_state, info)` tuple containing a padded

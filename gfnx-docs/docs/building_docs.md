@@ -41,11 +41,12 @@ Build the static site and fail on any warning (broken links, unknown
 cross-references, docstring parameters that do not match the signature):
 
 ```bash
-mkdocs build -f gfnx-docs/mkdocs.yml --strict -d site
+mkdocs build -f gfnx-docs/mkdocs.yml --strict -d ../site
 ```
 
-The output is written to `site/` (ignored by git); open `site/index.html` or
-serve it with `python -m http.server -d site`.
+MkDocs resolves `-d` relative to `gfnx-docs/`, so `../site` writes the site to
+`site/` at the repository root, which is ignored by git. Open `site/index.html`
+or serve it with `python -m http.server -d site`.
 
 ## Writing documentation
 

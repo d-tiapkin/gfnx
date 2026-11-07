@@ -223,8 +223,8 @@ class FixedAutoregressiveSequenceEnvironment(SequenceEnvironment):
       generation DAG is a tree, so $P_B$ is degenerate (always 1).
     * **Termination** — after exactly `max_length` steps, when the buffer is full.
 
-    Each object has exactly one trajectory, so the number of terminal states is
-    `nchar ** max_length`.
+    There are `nchar ** max_length` terminal states, each reached by exactly one
+    trajectory.
     """
 
     def step(

@@ -104,8 +104,9 @@ class QM9SmallRewardModule(
             reward_params: Parameters holding the reward table.
 
         Returns:
-            Scalar reward; out-of-range indices (e.g. from `[PAD]` tokens in a
-            non-terminal state) get `min_reward`.
+            Scalar reward. Only meaningful for terminal states: a non-terminal state
+            containing `[PAD]` tokens can map to an unrelated entry of the table.
+            Indices beyond the table return `min_reward`.
         """
         powers_array = jnp.array([
             self.nchar ** (self.max_length - i - 1) for i in range(self.max_length)

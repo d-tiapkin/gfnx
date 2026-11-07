@@ -1,7 +1,7 @@
 # Notebooks
 
 Self-contained notebooks that run in Google Colab with nothing but a browser.
-Each one installs `gfnx` from GitHub in its first cell; the sources live in
+Each one installs `gfnx` from GitHub in its first code cell; the sources live in
 [`notebooks/`](https://github.com/d-tiapkin/gfnx/tree/main/notebooks).
 
 | Notebook | What you will learn | Time (CPU) | |
@@ -12,7 +12,7 @@ Each one installs `gfnx` from GitHub in its first cell; the sources live in
 
 !!! note "Colab runtime"
     `gfnx` supports Python 3.12–3.14, which covers the current Colab runtimes.
-    The first cell installs `gfnx` and, if that upgrades `numpy` or `jax` while
+    The first code cell installs `gfnx` and, if that upgrades `numpy` or `jax` while
     an older version is already loaded, restarts the runtime once; run the
     notebook again from the top after the restart.
 

@@ -84,6 +84,10 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
     parent's set is the intersection of its children's sets if it is non-empty and their
     union otherwise (each union is one mutation for the parsimony score).
 
+    Each tree of the forest occupies a *slot* `0 .. n - 1`, named after the smallest
+    species it contains: initially slot `i` holds species `i`, and merging the trees of
+    slots $i < j$ leaves the result in slot $i$ and empties slot $j$.
+
     * **State** — the forest; see [`EnvState`][gfnx.environment.phylogenetic_tree.EnvState].
     * **Forward actions** — `n * (n - 1) / 2` actions, one per unordered pair of slots
       $(i, j)$, $i < j$, in `jnp.triu_indices(n, k=1)` order. The action merges the trees
@@ -91,9 +95,9 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
     * **Backward actions** — `n - 1` actions. Action `b` splits the tree in slot `b` at
       its root; it is valid iff that root is an internal node. Node ids are kept
       contiguous by swapping the removed node with the most recently created one.
-    * **Observation** — one-hot Fitch features of each slot's root, `uint8` of shape
-      `[n, L, bits_per_seq_elem]` (zeros for empty slots), designed for transformer
-      policies.
+    * **Observation** — multi-hot encoding (one bit per character) of the Fitch set of
+      each slot's root, `uint8` of shape `[n, L, bits_per_seq_elem]` (zeros for empty
+      slots), designed for transformer policies.
     * **Episode length** — exactly `n - 1` steps.
 
     Args:
@@ -336,7 +340,7 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
         )
 
     def get_obs(self, state: EnvState, env_params: EnvParams) -> chex.ArrayTree:
-        """Returns one-hot Fitch features of each slot's root, shape `[n, L, bits]`."""
+        """Returns multi-hot Fitch sets of each slot's root, shape `[n, L, bits]`."""
         sequences = jnp.where(
             (state.to_root != -1)[:, jnp.newaxis],
             state.sequences[state.to_root],

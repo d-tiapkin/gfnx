@@ -28,8 +28,10 @@ class AMPEnvironment(AutoregressiveSequenceEnvironment):
       writes `[EOS]`.
     * **Backward actions** — a single action removing the last token ($P_B$ degenerate).
     * **Observation** — `[*tokens, last]`, shape `[61]`, where `last` is `[EOS]` if the
-      buffer is full without a stop token, and `[PAD]` otherwise. This guarantees the
-      proxy transformer always sees an end-of-sequence marker.
+      buffer is full without a stop token, and `[PAD]` otherwise. Every complete
+      peptide, including one that fills the buffer without a stop action, therefore
+      ends with an end-of-sequence marker in the policy observation. Unlike the other
+      sequence environments, no `[BOS]` is prepended.
     * **Episode length** — at most 60 steps.
 
     The environment has no constructor arguments.

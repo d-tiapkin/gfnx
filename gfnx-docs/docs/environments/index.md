@@ -38,7 +38,11 @@ Each family page has a narrative introduction and quick start, followed by an
 *Environment API* and a *Reward API* page generated from the docstrings.
 Enumerable environments additionally expose the exact target distribution,
 $\log Z$, the expected reward and (where implemented) exact sampling, which the
-[exact distribution metrics](../metrics/distribution_based/exact.md) use.
+[distribution metrics](../metrics/distribution_based/index.md) use.
+[`ExactDistributionMetricsModule`](../metrics/distribution_based/exact.md) also
+needs `get_all_states` and `state_to_index`, which the hypergrid and DAG
+environments implement; for TFBind-8 and QM9, use the approximate distribution
+metric, as their baselines do.
 
 ## Writing your own environment
 

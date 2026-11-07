@@ -1,6 +1,6 @@
 """Abstract base classes shared by every gfnx environment and reward module.
 
-gfnx separates a GFlowNet task into two independent, stateless objects:
+gfnx separates a GFlowNet task into two independent objects:
 
 * an **environment** ([`BaseEnvironment`][gfnx.base.BaseEnvironment]) that only describes
   the dynamics of the generation DAG — forward/backward transitions, action masks and
@@ -8,7 +8,7 @@ gfnx separates a GFlowNet task into two independent, stateless objects:
 * a **reward module** ([`BaseRewardModule`][gfnx.base.BaseRewardModule]) that maps a
   terminal state to a (log-)reward.
 
-Neither object holds mutable state. Everything that changes during training lives in
+Neither object holds training state: everything that changes during training lives in
 JAX pytrees: the environment state (`BaseEnvState`), the environment parameters
 (`BaseEnvParams`) and the reward parameters (`BaseRewardParams`). All methods operate on a
 **single** state without a batch dimension; use `jax.vmap` to batch them.
@@ -72,7 +72,7 @@ class BaseEnvState:
         """Whether the state corresponds to a real (non-padding) step.
 
         Convention: ``True`` for a real step, ``False`` for padding (the
-        complement of :attr:`is_pad`, exposed for the ``True = include``
+        complement of `is_pad`, exposed for the ``True = include``
         masking convention used throughout the library). Pass directly to
         ``masked_sum`` / ``masked_mean`` or as ``where=`` to JAX reductions;
         no negation needed.
@@ -105,9 +105,10 @@ class BaseRewardParams:
 class BaseRewardModule(ABC, Generic[TEnvState, TEnvParams, TRewardParams]):
     r"""Base class for reward functions.
 
-    A reward module maps a single **terminal** state to a scalar (log-)reward. It is fully
-    decoupled from the environment: it never sees the environment object or its
-    parameters, only the terminal state and its own `reward_params`.
+    A reward module maps a single **terminal** state to a scalar (log-)reward. It is
+    decoupled from the environment: `reward` and `log_reward` never see the environment
+    object or its parameters, only the terminal state and the module's own
+    `reward_params`.
 
     Subclasses must implement:
 
@@ -196,10 +197,11 @@ class BaseEnvironment(ABC, Generic[TEnvState, TEnvParams]):
 
     **Masks.** Every `*_mask` uses the convention `True` = valid / include.
 
-    **Enumerable environments** additionally implement `get_all_states`,
+    **Enumerable environments** may additionally implement `get_all_states`,
     `state_to_index`, `get_true_distribution`, `get_empirical_distribution`,
-    `get_expected_reward`, `get_normalizing_constant` and `get_ground_truth_sampling`
-    (gated by the `is_*` properties). These take `reward_module` and `reward_params`
+    `get_expected_reward`, `get_normalizing_constant` and `get_ground_truth_sampling`.
+    Which helpers exist depends on the environment: check `is_enumerable` and the
+    `is_*_tractable` properties. The helpers take `reward_module` and `reward_params`
     explicitly because the environment does not own a reward.
     """
 
@@ -218,9 +220,11 @@ class BaseEnvironment(ABC, Generic[TEnvState, TEnvParams]):
     @property
     @abstractmethod
     def max_steps_in_episode(self) -> int:
-        """Maximum number of forward steps from $s_0$ to any terminal state.
+        """Upper bound on the number of forward steps from $s_0$ to any terminal state.
 
-        Must be exact: `forward_rollout` allocates `max_steps_in_episode + 1` time steps.
+        Counts the stop action, if any. `forward_rollout` allocates
+        `max_steps_in_episode + 1` time steps: a value below the true maximum truncates
+        trajectories, while a loose bound only adds padding.
         """
         raise NotImplementedError
 
@@ -340,9 +344,10 @@ class BaseEnvironment(ABC, Generic[TEnvState, TEnvParams]):
         """Returns the mask of currently valid backward actions for a single state.
 
         Convention: ``True`` = valid backward action, ``False`` = invalid. See
-        :meth:`get_action_mask` for the rationale and intended usage.
+        [`get_action_mask`][gfnx.base.BaseEnvironment.get_action_mask] for the rationale and
+        intended usage.
 
-        Not batched — use :meth:`get_backward_action_mask_batch` for batches.
+        Not batched — use `get_backward_action_mask_batch` for batches.
         """
         raise NotImplementedError
 
@@ -354,13 +359,13 @@ class BaseEnvironment(ABC, Generic[TEnvState, TEnvParams]):
     def get_action_mask_batch(
         self, state: TEnvState, env_params: TEnvParams
     ) -> Bool[Array, "batch_size n_actions"]:
-        """Batched :meth:`get_action_mask` for use in loss functions. state: [B, ...]."""
+        """Batched `get_action_mask` for use in loss functions. state: [B, ...]."""
         return jax.vmap(self.get_action_mask, in_axes=(0, None))(state, env_params)
 
     def get_backward_action_mask_batch(
         self, state: TEnvState, env_params: TEnvParams
     ) -> Bool[Array, "batch_size n_bwd_actions"]:
-        """Batched :meth:`get_backward_action_mask` for use in loss functions. state: [B, ...]."""
+        """Batched `get_backward_action_mask` for use in loss functions. state: [B, ...]."""
         return jax.vmap(self.get_backward_action_mask, in_axes=(0, None))(state, env_params)
 
     def get_backward_action_batch(

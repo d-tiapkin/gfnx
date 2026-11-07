@@ -84,8 +84,8 @@ log_Z = env.get_log_normalizing_constant(env_params, reward_module, reward_param
 ```
 
 Use `jax.vmap` externally to explore multiple graphs in parallel. Modified
-Detailed Balance (`baselines/mdb_dag.py`) uses `delta_score` for $O(d^2)$
-per-step updates rather than re-evaluating the full score.
+Detailed Balance (`baselines/mdb_dag.py`) uses `delta_score` to re-score only
+the node whose parent set changed at each step, rather than the whole graph.
 
 ## API references
 

@@ -74,7 +74,8 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
       is `0`, which undoes the stop action.
     * **Observation** — concatenated one-hot encodings of the coordinates, a float vector
       of shape `[dim * side]`.
-    * **Episode length** — at most `dim * side` steps (`max_steps_in_episode`).
+    * **Episode length** — at most `dim * (side - 1) + 1` steps, including the stop
+      action; `max_steps_in_episode` returns the looser bound `dim * side`.
 
     The environment is enumerable: it exposes the exact target distribution, the
     normalising constant, the expected reward and exact sampling for any hypergrid

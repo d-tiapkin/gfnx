@@ -24,8 +24,7 @@ class BaseDAGPrior(Generic[TDAGPriorParams]):
     r"""Base class for priors $P(G)$ over DAGs.
 
     Subclasses implement `init` and `log_prob`. `delta_score` defaults to the difference
-    of two `log_prob` calls; modular priors should override it with an $O(1)$ local
-    update.
+    of two `log_prob` calls; modular priors should override it with a local update.
     """
 
     def init(self, rng_key: chex.PRNGKey, dummy_state: DAGEnvState) -> TDAGPriorParams:

@@ -53,6 +53,9 @@ class PhyloTreeRewardModule(
 
         Deleu, T., Nouri, P., Malkin, N., Precup, D., Bengio, Y. (2024). Discrete
         probabilistic inference as control in multi-path environments. UAI.
+
+        Pan, L., Malkin, N., Zhang, D., Bengio, Y. (2023). Better training of GFlowNets
+        with local credit and incomplete trajectories. ICML.
     """
 
     def __init__(self, num_nodes: int, scale: float = 1.0, C: float = 0.0):

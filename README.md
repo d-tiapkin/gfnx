@@ -21,13 +21,13 @@
 
 ## Documentation
 
-The full documentation is hosted at **[gfnx.readthedocs.io](https://gfnx.readthedocs.io/en/latest/)**; its sources live in [`gfnx-docs/docs/`](gfnx-docs/docs/) and can be read directly on GitHub. First-time readers should go through:
+The full documentation is hosted at **[gfnx.readthedocs.io](https://gfnx.readthedocs.io/en/latest/)**. First-time readers should go through:
 
-1. [Background](gfnx-docs/docs/background.md) — GFlowNets, forward/backward policies and the training objectives.
-2. [Walkthrough](gfnx-docs/docs/walkthrough.md) — a complete Detailed Balance baseline, line by line, including vmapping training over seeds.
-3. [API reference](gfnx-docs/docs/api/index.md) — generated from the docstrings of [environments](gfnx-docs/docs/environments/index.md), reward modules, rollout utilities and [metrics](gfnx-docs/docs/metrics/index.md).
+1. [Background](https://gfnx.readthedocs.io/en/latest/background/) — GFlowNets, forward/backward policies and the training objectives.
+2. [Walkthrough](https://gfnx.readthedocs.io/en/latest/walkthrough/) — a complete Detailed Balance baseline, line by line, including vmapping training over seeds.
+3. [API reference](https://gfnx.readthedocs.io/en/latest/api/) — generated from the docstrings of [environments](https://gfnx.readthedocs.io/en/latest/environments/), reward modules, rollout utilities and [metrics](https://gfnx.readthedocs.io/en/latest/metrics/).
 
-The [notebooks](notebooks/) open in Google Colab and need nothing but a browser; [baselines](gfnx-docs/docs/baselines.md) lists every ready-to-run training script. To build the docs site locally, see [Building the docs](gfnx-docs/docs/building_docs.md).
+The Markdown sources live in [`gfnx-docs/docs/`](gfnx-docs/docs/). The API and environment pages are generated from docstrings, so read those on the hosted site rather than on GitHub. The [notebooks](notebooks/) open in Google Colab and need nothing but a browser; [baselines](gfnx-docs/docs/baselines.md) lists every ready-to-run training script. To build the docs site locally, see [Building the docs](gfnx-docs/docs/building_docs.md).
 
 ## Installation
 

@@ -27,8 +27,9 @@ class BaseDAGLikelihood(Generic[TDAGLikelihoodParams]):
 
     A modular likelihood decomposes over nodes,
     $\log P(\mathcal{D} \mid G) = \sum_j \mathrm{LocalScore}(X_j \mid \mathrm{Pa}_G(X_j))$.
-    Subclasses implement `init` and the vectorised `_local_score`; `log_prob` and the
-    $O(1)$-in-$d$ `delta_score` are derived from it.
+    Subclasses implement `init` and the vectorised `_local_score`; `log_prob` and
+    `delta_score` (which re-scores only the target node instead of all $d$) are derived
+    from it.
     """
 
     def init(self, rng_key: chex.PRNGKey, dummy_state: DAGEnvState) -> TDAGLikelihoodParams:
@@ -243,7 +244,9 @@ class BGeScore(BaseDAGLikelihood[BGeScoreParams]):
             `None`.
         alpha_mu: Equivalent sample size $\alpha_\mu$ of the prior on the mean.
         alpha_w: Degrees of freedom $\alpha_w$ of the Wishart prior; must exceed
-            `num_variables - 1`. Defaults to `num_variables + 2`.
+            `num_variables + 1`, so that
+            $t = \alpha_\mu (\alpha_w - d - 1) / (\alpha_\mu + 1) > 0$. Defaults to
+            `num_variables + 2`.
 
     References:
         Geiger, D., Heckerman, D. (1994). Learning Gaussian networks. UAI.
