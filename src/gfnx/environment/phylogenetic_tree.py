@@ -162,7 +162,7 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
         )
 
     def init(self, rng_key: chex.PRNGKey) -> EnvParams:
-        """Returns `EnvParams(num_nodes, sequence_length)`. The environment is deterministic."""
+        """Returns `EnvParams(num_nodes, sequence_length, bits_per_seq_elem)`; deterministic."""
         return EnvParams(
             num_nodes=self.num_nodes,
             sequence_length=self.sequence_length,
