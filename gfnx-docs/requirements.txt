@@ -1,3 +1,8 @@
-mkdocs
-mkdocs-material
-mkdocstrings[python]
+# Documentation toolchain. MkDocs 2.0 drops the plugin system that
+# mkdocs-material and mkdocstrings rely on, so stay on MkDocs 1.x.
+mkdocs>=1.6,<2
+mkdocs-material>=9.5,<10
+mkdocstrings>=0.29
+mkdocstrings-python>=1.16
+# Formats the separated function signatures on API pages.
+ruff

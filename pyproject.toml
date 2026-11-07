@@ -70,6 +70,7 @@ tests = [
 [project.urls]
 Homepage = "https://github.com/d-tiapkin/gfnx"
 Issues = "https://github.com/d-tiapkin/gfnx/issues"
+Documentation = "https://gfnx.readthedocs.io/en/latest/"
 
 
 

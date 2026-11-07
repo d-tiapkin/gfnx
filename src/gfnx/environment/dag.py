@@ -1,3 +1,10 @@
+"""DAG environment for Bayesian structure learning: add edges one at a time.
+
+Rewards (graph priors and marginal likelihoods) live in
+[`gfnx.reward.dag`][gfnx.reward.dag], [`gfnx.reward.dag_prior`][gfnx.reward.dag_prior] and
+[`gfnx.reward.dag_likelihood`][gfnx.reward.dag_likelihood].
+"""
+
 from typing import Any
 
 import chex
@@ -21,6 +28,20 @@ from ..utils.dag import adj_to_index, construct_all_dags, get_all_adjacencies_fl
 
 @chex.dataclass(frozen=True)
 class EnvState(BaseEnvState):
+    r"""State of a single DAG environment.
+
+    Attributes:
+        adjacency_matrix: Boolean matrix of shape `[d, d]`; entry `[i, j]` is `True` iff
+            the graph contains the edge $X_i \to X_j$.
+        closure_T: Transitive closure of the *transposed* graph, shape `[d, d]`, with a
+            `True` diagonal: entry `[i, j]` is `True` iff $X_j$ reaches $X_i$ in $G$
+            (including $i = j$). Adding $X_i \to X_j$ creates a cycle iff
+            `closure_T[i, j]` is `True`.
+        is_terminal: `True` once the stop action has been taken.
+        is_initial: `True` for the empty graph.
+        is_pad: `True` for padding steps after termination.
+    """
+
     adjacency_matrix: Bool[Array, " num_variables num_variables"]
     closure_T: Bool[Array, " num_variables num_variables"]
     is_terminal: Bool[Array, ""]
@@ -30,10 +51,57 @@ class EnvState(BaseEnvState):
 
 @chex.dataclass(frozen=True)
 class EnvParams(BaseEnvParams):
+    """DAG dynamics parameters.
+
+    Attributes:
+        num_variables: Number of nodes $d$. Also needed by `delta_score` to decode edge
+            actions.
+    """
+
     num_variables: int = 4
 
 
 class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
+    r"""Sequential construction of directed acyclic graphs over $d$ variables.
+
+    Following Deleu et al. (2022), a GFlowNet samples a DAG $G$ over variables
+    $X_1, \ldots, X_d$ by starting from the empty graph and adding one edge at a time,
+    so that its terminal distribution approximates the posterior $P(G \mid \mathcal{D})$.
+    Every state is itself a valid DAG and can be terminated with the stop action.
+
+    * **State** — the adjacency matrix plus the transitive closure of its transpose
+      (`closure_T`), both `[d, d]` booleans. $s_0$ is the empty graph.
+    * **Forward actions** — `d * d + 1` actions. Action `i * d + j` adds the edge
+      $X_i \to X_j$; it is valid iff the edge is absent and does not close a cycle.
+      Action `d * d` (`stop_action`) terminates the trajectory and is always valid.
+    * **Backward actions** — same `d * d + 1` encoding: action `i * d + j` removes an
+      existing edge $X_i \to X_j$; at a terminal state the only valid backward action is
+      `d * d`, which undoes the stop. Forward and backward encodings coincide, so
+      `get_forward_action` / `get_backward_action` are the identity.
+    * **Observation** — the adjacency matrix, `[d, d]` booleans.
+    * **Episode length** — at most `d * (d - 1) / 2 + 1` steps (a complete DAG, then stop).
+
+    **Online acyclicity.** Adding $u \to v$ updates `closure_T` with a single outer
+    product (every node that reaches $u$ can now reach every node reachable from $v$),
+    an $O(d^2)$ update with no graph traversal. The action mask is
+    `~(adjacency_matrix | closure_T)`. Removing an edge recomputes the closure by BFS.
+
+    **Enumeration.** For `d < 6` (29,281 DAGs at `d = 5`) the environment enumerates
+    every DAG and exposes the exact posterior, $\log Z$ (computed in log space) and the
+    expected reward.
+
+    Args:
+        num_variables: Number of variables $d$.
+
+    Attributes:
+        stop_action: Index of the stop action (`d * d`).
+
+    References:
+        Deleu, T., Góis, A., Emezue, C., Rankawat, M., Lacoste-Julien, S., Bauer, S.,
+        Bengio, Y. (2022). Bayesian structure learning with generative flow networks.
+        UAI.
+    """
+
     def __init__(
         self,
         num_variables: int,
@@ -47,6 +115,7 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
             self.all_dags_num = self.all_adjacencies_flat_bits.shape[0]
 
     def reset(self) -> EnvState:
+        """Returns the empty graph (identity `closure_T`)."""
         return EnvState(
             adjacency_matrix=jnp.zeros(
                 (self.num_variables, self.num_variables),
@@ -59,10 +128,12 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
         )
 
     def init(self, rng_key: chex.PRNGKey) -> EnvParams:
+        """Returns `EnvParams(num_variables)`. The environment is deterministic."""
         return EnvParams(num_variables=self.num_variables)
 
     @property
     def max_steps_in_episode(self) -> int:
+        """`d * (d - 1) / 2` edge additions (a complete DAG) plus the stop action."""
         return (self.num_variables * (self.num_variables - 1)) // 2 + 1
 
     def step(
@@ -71,6 +142,16 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
         action: TAction,
         env_params: EnvParams,
     ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
+        r"""Adds the edge `divmod(action, d)` or stops.
+
+        Args:
+            state: Current state.
+            action: Edge index `i * d + j` (adds $X_i \to X_j$), or `stop_action`.
+            env_params: Environment parameters.
+
+        Returns:
+            `(obs, next_state, done, info)`; `done` is `True` after the stop action.
+        """
         done = action == self.stop_action
         source, target = jnp.divmod(action, self.num_variables)
 
@@ -148,9 +229,17 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
         backward_action: chex.Array,
         env_params: EnvParams,
     ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
-        """Backward transition for the DAG environment.
+        """Removes an edge, or undoes the stop action at a terminal state.
 
-        Removing an edge is equivalent to adding a 'phantom' edge in reverse.
+        Args:
+            state: Current state.
+            backward_action: Edge index `i * d + j` of an existing edge to remove, or
+                `stop_action` at a terminal state.
+            env_params: Environment parameters.
+
+        Returns:
+            `(obs, prev_state, done, info)`; `done` is `True` once the graph is empty.
+            `closure_T` is recomputed from scratch by BFS after an edge removal.
         """
         unterminate = backward_action == self.stop_action
 
@@ -186,6 +275,7 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
         )
 
     def get_obs(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        """Returns the adjacency matrix, shape `[d, d]`."""
         return state.adjacency_matrix
 
     def get_backward_action(
@@ -195,6 +285,7 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
         _next_state: EnvState,
         _params: EnvParams,
     ) -> chex.Array:
+        """Identity: forward and backward actions share the same encoding."""
         # Forward and backward action spaces share the same indexing: edge
         # indices `i * N + j` for `i, j in [0, N)`, plus the stop/unterminate
         # action at index `N * N`. The two cases (edge add vs. termination)
@@ -208,6 +299,7 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
         _prev_state: EnvState,
         _params: EnvParams,
     ) -> chex.Array:
+        """Identity: forward and backward actions share the same encoding."""
         # See `get_backward_action` — the forward/backward action encodings
         # coincide, so inverting an edge removal or an un-terminate step
         # is the identity.
@@ -242,18 +334,22 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
 
     @property
     def name(self) -> str:
+        """Environment name."""
         return f"DAG-{self.num_variables}-v0"
 
     @property
     def action_space(self) -> spaces.Discrete:
+        """`Discrete(d * d + 1)`: edges `i * d + j`, then the stop action."""
         return spaces.Discrete(self.num_variables * self.num_variables + 1)
 
     @property
     def backward_action_space(self) -> spaces.Discrete:
+        """`Discrete(d * d + 1)`: edge removals, then un-stop."""
         return spaces.Discrete(self.num_variables * self.num_variables + 1)
 
     @property
     def observation_space(self) -> spaces.Box:
+        """Boolean adjacency matrix of shape `[d, d]`."""
         return spaces.Box(
             low=0,
             high=1,
@@ -263,6 +359,7 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
 
     @property
     def state_space(self) -> spaces.Dict:
+        """State space of the environment."""
         return spaces.Dict({
             "adjacency_matrix": spaces.Box(
                 low=0,
@@ -283,13 +380,15 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
 
     @property
     def is_enumerable(self) -> bool:
+        """`True` for `d < 6`, where all DAGs can be listed."""
         return self.num_variables < 6
 
     def state_to_index(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        """Returns the index of a single DAG in `get_all_states` (enumerable only)."""
         return adj_to_index(state.adjacency_matrix, self.all_adjacencies_flat_bits)
 
     def get_all_states(self, env_params: EnvParams) -> EnvState:
-        """Returns all DAG states (batched — this method is inherently batch-returning)."""
+        """Returns every DAG on `d` nodes as a batched `EnvState`, sorted by index."""
         all_adjacency_matrices = construct_all_dags(self.num_variables)
         sort_idx = jax.vmap(adj_to_index, in_axes=(0, None))(
             all_adjacency_matrices, self.all_adjacencies_flat_bits
@@ -328,11 +427,12 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
     def get_true_distribution(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> chex.Array:
+        """Returns the exact posterior $R(G)/Z$ over all DAGs, shape `[num_dags]`."""
         rewards = self._get_states_rewards(env_params, reward_module, reward_params)
         return rewards / rewards.sum()
 
     def get_empirical_distribution(self, states: EnvState, env_params: EnvParams) -> chex.Array:
-        """Extracts empirical distribution from a batch of states."""
+        """Histogram of a batch of terminal DAGs, shape `[num_dags]`."""
         sample_idx = jax.vmap(adj_to_index, in_axes=(0, None))(
             states.adjacency_matrix, self.all_adjacencies_flat_bits
         )
@@ -345,27 +445,36 @@ class DAGEnvironment(BaseEnvironment[EnvState, EnvParams]):
 
     @property
     def is_expected_reward_tractable(self) -> bool:
+        """`True` for `d < 6`."""
         return self.num_variables < 6
 
     def get_expected_reward(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> float:
+        r"""Returns $\sum_G R(G)^2 / \sum_G R(G)$, computed in log space."""
         # E_{x ~ R/Z}[R(x)] = sum R^2 / sum R, computed in log space
         log_reward = self._get_states_log_rewards(env_params, reward_module, reward_params)
         return jnp.exp(jax.nn.logsumexp(2 * log_reward) - jax.nn.logsumexp(log_reward))
 
     @property
     def is_normalizing_constant_tractable(self) -> bool:
+        """`True` for `d < 6`."""
         return self.num_variables < 6
 
     def get_normalizing_constant(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> float:
+        r"""Returns $Z = \exp(\log Z)$.
+
+        Raw DAG log-rewards are often far below float32's `exp` range, so prefer
+        `get_log_normalizing_constant`.
+        """
         return jnp.exp(self.get_log_normalizing_constant(env_params, reward_module, reward_params))
 
     def get_log_normalizing_constant(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> float:
+        r"""Returns $\log Z = \operatorname{logsumexp}_G \log R(G)$ over all DAGs."""
         # Log space: raw DAG log rewards can be far below float32's exp range.
         log_reward = self._get_states_log_rewards(env_params, reward_module, reward_params)
         return jax.nn.logsumexp(log_reward)

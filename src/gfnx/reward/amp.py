@@ -1,3 +1,8 @@
+"""Proxy-model reward for the antimicrobial peptide (AMP) environment.
+
+See [`AMPEnvironment`][gfnx.environment.amp.AMPEnvironment].
+"""
+
 import os
 from typing import Any
 
@@ -12,10 +17,47 @@ from ..utils.proteins import PROTEINS_FULL_ALPHABET
 
 @chex.dataclass(frozen=True)
 class AMPRewardParams(BaseRewardParams):
+    """Parameters of the AMP reward.
+
+    Attributes:
+        model_params: Array leaves of the pretrained Equinox proxy classifier.
+    """
+
     model_params: Any
 
 
 class EqxProxyAMPRewardModule(BaseRewardModule[AMPEnvState, AMPEnvParams, AMPRewardParams]):
+    r"""Antimicrobial activity predicted by a pretrained transformer classifier.
+
+    $$
+    R(x) = \max\left(\sigma\big(f_\phi(x)\big)^{\gamma},\; R_{\min}\right),
+    $$
+
+    where $f_\phi$ is the logit of a transformer classifier trained on DBAASP to
+    separate antimicrobial from non-antimicrobial peptides, $\gamma$ is the reward
+    exponent and $R_{\min}$ the minimal reward. Pretrained weights ship in
+    `proxy/weights/amp`; retrain them with `python proxy/train_proxy.py --config-name amp`.
+
+    Args:
+        proxy_config_path: Path to the Hydra/OmegaConf config used to train the proxy
+            (its `network` section defines the architecture), e.g.
+            `"proxy/configs/amp.yaml"`. Resolved relative to the working directory.
+        pretrained_proxy_path: Orbax checkpoint directory, e.g.
+            `"proxy/weights/amp/model"`. Relative paths are resolved against the
+            repository root, so use a repository checkout (editable install) or pass an
+            absolute path.
+        reward_exponent: Exponent $\gamma$ applied to the predicted probability.
+        min_reward: Lower clip $R_{\min}$.
+
+    References:
+        Malkin, N., et al. (2022). Trajectory balance: Improved credit assignment in
+        GFlowNets. NeurIPS.
+
+        Pirtskhalava, M., et al. (2021). DBAASP v3: database of antimicrobial/cytotoxic
+        activity and structure of peptides as a resource for development of new
+        therapeutics. Nucleic Acids Research, 49.
+    """
+
     def __init__(
         self,
         proxy_config_path: str,
@@ -23,9 +65,6 @@ class EqxProxyAMPRewardModule(BaseRewardModule[AMPEnvState, AMPEnvParams, AMPRew
         reward_exponent: float = 1.0,
         min_reward: float = 1e-6,
     ):
-        """
-        Proxy reward model for amp
-        """
         # Load config to a proxy model
         import omegaconf
 
@@ -43,6 +82,21 @@ class EqxProxyAMPRewardModule(BaseRewardModule[AMPEnvState, AMPEnvParams, AMPRew
         self.min_reward = min_reward
 
     def init(self, rng_key: chex.PRNGKey, dummy_state: AMPEnvState) -> AMPRewardParams:
+        """Restores the pretrained proxy network.
+
+        Builds an `EqxTransformerRewardModel` from the `network` section of the config,
+        restores its weights from `pretrained_proxy_path` with Orbax, and splits it into
+        arrays (returned as `reward_params`) and static structure (stored on the module
+        as `model_static`). `reward` therefore only works on a module whose `init` has
+        been called. Requires `equinox` and `orbax-checkpoint` (the `baselines` extra).
+
+        Args:
+            rng_key: Key used to build the network skeleton before restoring weights.
+            dummy_state: Unused.
+
+        Returns:
+            Reward parameters holding the proxy weights.
+        """
         # Lazy imports to avoid importing equinox in the main module
         import equinox as eqx
         import orbax.checkpoint as ocp
@@ -68,9 +122,19 @@ class EqxProxyAMPRewardModule(BaseRewardModule[AMPEnvState, AMPEnvParams, AMPRew
         return AMPRewardParams(model_params=model_params)
 
     def log_reward(self, state: AMPEnvState, reward_params: AMPRewardParams) -> TLogReward:
+        r"""Computes $\log R(x)$ (log of `reward`)."""
         return jnp.log(self.reward(state, reward_params))
 
     def reward(self, state: AMPEnvState, reward_params: AMPRewardParams) -> TReward:
+        """Runs the proxy on `state.tokens` (dropout off) and returns the clipped reward.
+
+        Args:
+            state: Terminal AMP state.
+            reward_params: Proxy weights returned by `init`.
+
+        Returns:
+            Scalar reward in `[min_reward, 1]`.
+        """
         # Lazy imports to avoid importing equinox in the main module
         import equinox as eqx
 

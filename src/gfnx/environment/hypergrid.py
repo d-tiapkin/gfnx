@@ -1,3 +1,11 @@
+"""Hypergrid environment: walk on a $D$-dimensional grid and decide when to stop.
+
+The hypergrid is the classic GFlowNet benchmark of Bengio et al. (2021). It is small,
+fully enumerable and highly multimodal under the standard rewards, which makes it the
+default environment for debugging objectives and policies. Rewards live in
+[`gfnx.reward.hypergrid`][gfnx.reward.hypergrid].
+"""
+
 from itertools import product
 from math import prod
 from typing import Any
@@ -21,6 +29,15 @@ from ..base import (
 
 @chex.dataclass(frozen=True)
 class EnvState(BaseEnvState):
+    r"""State of a single hypergrid environment.
+
+    Attributes:
+        state: Integer coordinates $(s^1, \ldots, s^D)$, each in `[0, side - 1]`.
+        is_terminal: `True` once the stop action has been taken.
+        is_initial: `True` at the origin before any step.
+        is_pad: `True` for padding steps after termination.
+    """
+
     state: Int[Array, " dim"]
     is_terminal: Bool[Array, ""]
     is_initial: Bool[Array, ""]
@@ -29,13 +46,52 @@ class EnvState(BaseEnvState):
 
 @chex.dataclass(frozen=True)
 class EnvParams(BaseEnvParams):
+    """Hypergrid dynamics parameters.
+
+    Attributes:
+        dim: Number of dimensions $D$.
+        side: Number of cells $H$ per dimension.
+    """
+
     dim: int = 4
     side: int = 20
 
 
 class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
-    """
-    Hypergrid environment
+    r"""Hypergrid environment of size $H^D$.
+
+    An object is a cell of the grid $\{0, \ldots, H-1\}^D$. It is built by starting at
+    the origin and repeatedly incrementing one coordinate by one, until the agent takes
+    the stop action. The terminal state is the cell where the agent stopped, so every
+    cell is a possible terminal object and $|\mathcal{X}| = H^D$.
+
+    * **State** — the coordinate vector `state` of shape `[dim]`; $s_0 = (0, \ldots, 0)$.
+    * **Forward actions** — `dim + 1` actions. Action `i < dim` increments coordinate
+      `i`; action `dim` (`env.stop_action`) terminates the trajectory. Incrementing a
+      coordinate that is already at `side - 1` is masked out.
+    * **Backward actions** — `dim` actions. Action `i` decrements coordinate `i`
+      (valid iff it is positive). From a terminal state the only valid backward action
+      is `0`, which undoes the stop action.
+    * **Observation** — concatenated one-hot encodings of the coordinates, a float vector
+      of shape `[dim * side]`.
+    * **Episode length** — at most `dim * (side - 1) + 1` steps, including the stop
+      action; `max_steps_in_episode` returns the looser bound `dim * side`.
+
+    The environment is enumerable: it exposes the exact target distribution, the
+    normalising constant, the expected reward and exact sampling for any hypergrid
+    reward module.
+
+    Args:
+        dim: Number of dimensions $D$. The state space grows as $H^D$.
+        side: Number of cells $H$ per dimension. Must match the `side` of the reward
+            module.
+
+    Attributes:
+        stop_action: Index of the stop action (equal to `dim`).
+
+    References:
+        Bengio, E., Jain, M., Korablyov, M., Precup, D., Bengio, Y. (2021). Flow network
+        based generative models for non-iterative diverse candidate generation. NeurIPS.
     """
 
     def __init__(self, dim: int = 4, side: int = 20) -> None:
@@ -45,6 +101,7 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
         self.stop_action = self.dim  # Stop action id
 
     def reset(self) -> EnvState:
+        """Returns the initial state: the origin of the grid."""
         return EnvState(
             state=jnp.zeros((self.dim,), dtype=jnp.int32),
             is_terminal=jnp.bool_(False),
@@ -53,6 +110,7 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
         )
 
     def init(self, rng_key: chex.PRNGKey) -> EnvParams:
+        """Returns `EnvParams(dim, side)`. The environment is deterministic."""
         return EnvParams(dim=self.dim, side=self.side)
 
     @property
@@ -62,10 +120,15 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
 
     @property
     def max_steps_in_episode(self) -> int:
+        """Upper bound `dim * side` on the trajectory length."""
         return self.dim * self.side
 
     def get_all_states(self, env_params: EnvParams) -> EnvState:
-        """Returns all states in the environment in some order."""
+        """Returns every cell of the grid as a batched `EnvState` of size `side ** dim`.
+
+        Cells are listed in row-major (`itertools.product`) order, which matches
+        `state_to_index`.
+        """
 
         all_states_coords = jnp.array(list(product(range(self.side), repeat=self.dim)))
         num_states = all_states_coords.shape[0]
@@ -81,6 +144,7 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
         )
 
     def state_to_index(self, state: EnvState, env_params: EnvParams) -> chex.Array:
+        """Returns the row-major index of a single cell in `[0, side ** dim)`."""
         return jnp.ravel_multi_index(
             state.state.astype(jnp.int32),
             dims=(self.side,) * self.dim,
@@ -93,6 +157,16 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
         action: TAction,
         env_params: EnvParams,
     ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
+        """Increments a coordinate or stops.
+
+        Args:
+            state: Current state.
+            action: Coordinate index in `[0, dim)` to increment, or `stop_action`.
+            env_params: Environment parameters.
+
+        Returns:
+            `(obs, next_state, done, info)`; `done` is `True` after the stop action.
+        """
         # Compute the "active" next state (always, regardless of is_terminal)
         done = jnp.logical_or(
             action == self.stop_action,
@@ -123,6 +197,17 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
         backward_action: chex.Array,
         env_params: EnvParams,
     ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
+        """Decrements a coordinate, or undoes the stop action at a terminal state.
+
+        Args:
+            state: Current state.
+            backward_action: Coordinate index in `[0, dim)` to decrement. Ignored at a
+                terminal state, where the only backward move is to un-terminate.
+            env_params: Environment parameters.
+
+        Returns:
+            `(obs, prev_state, done, info)`; `done` is `True` once the origin is reached.
+        """
         # Undo stop: just un-set terminal flag
         undo_stop = EnvState(
             state=state.state,
@@ -155,7 +240,7 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
         )
 
     def get_obs(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        """Returns one-hot observation for a single state."""
+        """Returns the flattened one-hot encoding of the coordinates, shape `[dim * side]`."""
         state_ohe = jax.nn.one_hot(state.state, self.side, dtype=jnp.float32)
         return jnp.reshape(state_ohe, (self.dim * self.side,))
 
@@ -166,7 +251,7 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
         next_state: EnvState,
         params: EnvParams,
     ) -> chex.Array:
-        """Returns backward action given the forward transition (single)."""
+        """Maps an increment of coordinate `i` to backward action `i`, and stop to `0`."""
         return jnp.where(forward_action >= self.backward_action_space.n, 0, forward_action)
 
     def get_forward_action(
@@ -176,7 +261,7 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
         prev_state: EnvState,
         env_params: EnvParams,
     ) -> chex.Array:
-        """Returns forward action given the backward transition (single)."""
+        """Returns `stop_action` if `state` is terminal, otherwise `backward_action`."""
         return jnp.where(state.is_terminal, self.stop_action, backward_action)
 
     def get_action_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:
@@ -237,7 +322,7 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
     def _get_states_rewards(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> chex.Array:
-        """Returns the reward for all states in the hypergrid."""
+        """Evaluates the reward on every cell; returns an array of shape `(side,) * dim`."""
         reward_side = getattr(reward_module, "side", self.side)
         if reward_side != self.side:
             raise ValueError(f"reward_module.side={reward_side} != environment side={self.side}")
@@ -259,12 +344,12 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
     def get_true_distribution(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> chex.Array:
-        """Returns the true distribution of rewards for all states."""
+        """Returns $R(x)/Z$ for every cell, as an array of shape `(side,) * dim`."""
         rewards = self._get_states_rewards(env_params, reward_module, reward_params)
         return rewards / rewards.sum()
 
     def get_empirical_distribution(self, states: EnvState, env_params: EnvParams) -> chex.Array:
-        """Extracts the empirical distribution from a batch of states."""
+        """Histogram of a batch of terminal states, as an array of shape `(side,) * dim`."""
         dist_shape = (self.side,) * self.dim
         sample_idx = jax.vmap(lambda x: jnp.ravel_multi_index(x, dims=dist_shape, mode="clip"))(
             states.state
@@ -278,26 +363,31 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
 
     @property
     def is_expected_reward_tractable(self) -> bool:
+        """`True`: the expected reward is computed by enumeration."""
         return True
 
     def get_expected_reward(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> float:
+        r"""Returns $\mathbb{E}_{x \sim R/Z}[R(x)] = \sum_x R(x)^2 / \sum_x R(x)$."""
         rewards = self._get_states_rewards(env_params, reward_module, reward_params)
         return jnp.pow(rewards, 2).sum() / rewards.sum()
 
     @property
     def is_normalizing_constant_tractable(self) -> bool:
+        """`True`: $Z$ is computed by enumeration."""
         return True
 
     def get_normalizing_constant(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> float:
+        r"""Returns $Z = \sum_x R(x)$ over all `side ** dim` cells."""
         rewards = self._get_states_rewards(env_params, reward_module, reward_params)
         return rewards.sum()
 
     @property
     def is_ground_truth_sampling_tractable(self) -> bool:
+        """`True`: exact samples are drawn from the enumerated distribution."""
         return True
 
     def get_ground_truth_sampling(
@@ -308,7 +398,18 @@ class HypergridEnvironment(BaseEnvironment[EnvState, EnvParams]):
         reward_module: BaseRewardModule,
         reward_params: TRewardParams,
     ) -> EnvState:
-        """Returns a batch of states sampled from the ground truth distribution."""
+        """Draws `batch_size` terminal cells exactly from $R(x)/Z$.
+
+        Args:
+            rng_key: Random key.
+            batch_size: Number of samples.
+            env_params: Environment parameters.
+            reward_module: Hypergrid reward module.
+            reward_params: Its parameters.
+
+        Returns:
+            Batched terminal `EnvState` with `state` of shape `[batch_size, dim]`.
+        """
         true_distribution = self.get_true_distribution(env_params, reward_module, reward_params)
         flat_distribution = true_distribution.flatten()
 

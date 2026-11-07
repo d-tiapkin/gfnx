@@ -207,8 +207,8 @@ def levenshtein_distance(
     Args:
         s1 (chex.Array): The first padded array of integers.
         s2 (chex.Array): The second padded array of integers.
-        EOS_ID (int): The integer representing the End-of-String token.
-        PAD_ID (int): The integer representing the padding token.
+        eos_id (int): The integer representing the End-of-String token.
+        pad_id (int): The integer representing the padding token.
 
     Returns:
         int: The Levenshtein distance between the two strings.

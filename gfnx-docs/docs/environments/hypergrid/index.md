@@ -2,31 +2,48 @@
 
 The hypergrid environment is a classic GFlowNet benchmark: you build a point on
 a $D$-dimensional grid by incrementing coordinates one step at a time and then
-decide when to stop. The terminal state is the final grid cell you land on, and
-its reward is given by a user-chosen hypergrid reward module. Because every
-transition is discrete and the search space is finite, the environment is great
-for debugging objectives and policies before moving on to more complicated
-domains.
+decide when to stop. Because every transition is discrete and the search space
+is finite and enumerable, the environment is great for debugging objectives and
+policies before moving on to more complicated domains.
 
-## Intuition
+!!! note "Single source of truth"
+    The specification below (states, actions, rewards, parameters) is rendered
+    directly from the docstrings of
+    [`HypergridEnvironment`][gfnx.environment.hypergrid.HypergridEnvironment] and
+    [`GeneralHypergridRewardModule`][gfnx.reward.hypergrid.GeneralHypergridRewardModule],
+    so it is also what `help(gfnx.HypergridEnvironment)` prints.
 
-- **State**: a vector of length `dim`, with each coordinate in
-  `[0, side - 1]`. The all-zero vector is the initial (empty) state.
-- **Actions**: choose a coordinate to increment or issue a *stop* action.
-  Coordinates that already reached `side - 1` are automatically clamped, so
-  the agent cannot walk off the grid.
-- **Trajectory**: a sequence of increments that ends with the stop action.
-- **Reward**: determined by a separate hypergrid reward module; higher values
-  make the corresponding grid cells more likely under an ideal GFlowNet.
+## Specification
 
-## Key parameters
+::: gfnx.environment.hypergrid.HypergridEnvironment
+    options:
+      members: false
+      show_root_heading: false
+      show_root_toc_entry: false
+      show_bases: false
+      heading_level: 3
 
-- `dim`: number of dimensions (default `4`). Increasing it makes the grid grow
-  exponentially; keep this small for quick experiments.
-- `side`: number of discrete positions per dimension (default `20`).
+## Reward
 
-The reward module is constructed and initialised separately — environments are
-fully decoupled from rewards (see the library overview for the rationale).
+::: gfnx.reward.hypergrid.GeneralHypergridRewardModule
+    options:
+      members: false
+      show_root_heading: false
+      show_root_toc_entry: false
+      show_bases: false
+      heading_level: 3
+
+Two presets fix $(R_0, R_1, R_2)$:
+
+- [`EasyHypergridRewardModule(side=...)`][gfnx.reward.hypergrid.EasyHypergridRewardModule]
+  — $(10^{-3}, 0.5, 2.0)$.
+- [`HardHypergridRewardModule(side=...)`][gfnx.reward.hypergrid.HardHypergridRewardModule]
+  — $(10^{-4}, 1.0, 3.0)$: a much lower background reward, so the modes are
+  harder to discover.
+
+You can plug in your own reward by subclassing
+[`BaseRewardModule`][gfnx.base.BaseRewardModule]; it only needs `init`,
+`log_reward` and `reward` on a single state.
 
 ## Quick start
 
@@ -79,31 +96,6 @@ log_rewards = jax.vmap(reward_module.log_reward, in_axes=(0, None))(
 )
 ```
 
-## Reward options
-
-- By default the reward assigned to a terminal state $s = (s^1, \ldots, s^D)$ with side length
-  `side = H` follows
-
-  $$
-  \mathcal{R}(s) = R_0
-  + R_1 \prod_{i=1}^D \mathbb{I}\left[0.25 < \left|\frac{s^i}{H-1}-0.5\right|\right]
-  + R_2 \prod_{i=1}^D \mathbb{I}\left[0.3 < \left|\tfrac{s^i}{H-1}-0.5\right| < 0.4\right].
-  $$
-
-  The indicator products carve out $2^D$ symmetric modes: instead of peaking at the grid centre,
-  the reward places mass on annuli that sit away from the middle, making exploration highly
-  multimodal. Adjusting $(R_0, R_1, R_2)$ changes how prominent each ring of modes is.
-
-- `gfnx.EasyHypergridRewardModule(side=...)` – baseline reward with a gentle
-  peak near the centre of the mode.
-- `gfnx.HardHypergridRewardModule(side=...)` – sharper peaks that make
-  exploration and credit assignment harder.
-- `gfnx.GeneralHypergridRewardModule(side=..., R0=..., R1=..., R2=...)` –
-  customise how wide the reward plateaus are by tuning the coefficients.
-
-You can plug your own reward by subclassing `BaseRewardModule`. It only needs to
-implement `init`, `log_reward`, and `reward` on a single state.
-
 ## Exploring the grid
 
 The hypergrid exposes utilities that are handy for analysis and evaluation.
@@ -131,16 +123,11 @@ gt_state = env.get_ground_truth_sampling(
 ```
 
 These helpers are invaluable for sanity checks (does your policy match the true
-distribution?) and for tracking metrics such as the mean reward or KL divergence
-to ground truth. For a deeper dive into the environment and reward APIs, check
-the companion pages in this section of the docs.
+distribution?) and for tracking metrics such as the mean reward or the KL
+divergence to the ground truth — see
+[`ExactDistributionMetricsModule`](../../metrics/distribution_based/exact.md).
 
-## API references:
+## API references
 
 - [Environment](environment_api.md)
 - [Reward module](reward_api.md)
-
-## References
-
-- Bengio, E. *et&nbsp;al.* (2021). *Flow network based generative models for non-iterative diverse candidate generation.* 
-  Advances in Neural Information Processing Systems (NeurIPS).

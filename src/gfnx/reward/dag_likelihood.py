@@ -1,3 +1,8 @@
+"""Modular marginal likelihoods for DAG structure learning.
+
+Combined with a prior by [`DAGRewardModule`][gfnx.reward.dag.DAGRewardModule].
+"""
+
 import math
 from typing import Generic, TypeVar
 
@@ -11,34 +16,44 @@ from ..environment import DAGEnvParams, DAGEnvState
 
 @chex.dataclass(frozen=True)
 class BaseDAGLikelihoodParams(BaseRewardParams):
-    pass
+    """Base (and empty) parameters of a marginal likelihood."""
 
 
 TDAGLikelihoodParams = TypeVar("TDAGLikelihoodParams", bound=BaseDAGLikelihoodParams)
 
 
 class BaseDAGLikelihood(Generic[TDAGLikelihoodParams]):
+    r"""Base class for modular marginal likelihoods $P(\mathcal{D} \mid G)$.
+
+    A modular likelihood decomposes over nodes,
+    $\log P(\mathcal{D} \mid G) = \sum_j \mathrm{LocalScore}(X_j \mid \mathrm{Pa}_G(X_j))$.
+    Subclasses implement `init` and the vectorised `_local_score`; `log_prob` and
+    `delta_score` (which re-scores only the target node instead of all $d$) are derived
+    from it.
+    """
+
     def init(self, rng_key: chex.PRNGKey, dummy_state: DAGEnvState) -> TDAGLikelihoodParams:
-        """Initialize the likelihood.
+        """Initialises the likelihood.
 
         Args:
-        - rng_key: chex.PRNGKey, random key
-        - dummy_state: DAGEnvState, a single dummy state (no batch dim)
+            rng_key: Random key.
+            dummy_state: Single DAG state (no batch dimension).
+
+        Returns:
+            Likelihood parameters (typically holding the data or its sufficient statistics).
         """
         raise NotImplementedError
 
     def log_prob(self, state: DAGEnvState, likelihood_params: TDAGLikelihoodParams) -> TLogReward:
-        """Computes the log-likelihood of the data given the state - graph G:
-
-            log P(D | G) = sum_j LocalScore(X_j | Pa_G(X_j))
+        r"""Computes $\log P(\mathcal{D} \mid G) = \sum_j \mathrm{LocalScore}(X_j \mid \mathrm{Pa}_G(X_j))$.
 
         Args:
-        - state: DAGEnvState, single state (no batch dim)
-        - likelihood_params: params of the likelihood
+            state: Single DAG state (no batch dimension).
+            likelihood_params: Likelihood parameters produced by `init`.
 
         Returns:
-        - scalar log-likelihood
-        """
+            Scalar log marginal likelihood.
+        """  # noqa: E501
         num_variables = state.adjacency_matrix.shape[0]
         # Row i of adjacency_matrix.T gives the parents of node i
         parents = state.adjacency_matrix.T  # [num_variables, num_variables]
@@ -55,20 +70,24 @@ class BaseDAGLikelihood(Generic[TDAGLikelihoodParams]):
         env_params: DAGEnvParams,
         likelihood_params: TDAGLikelihoodParams,
     ) -> TLogReward:
-        """Computes the delta-score for adding an edge X_i -> X_j to some graph
-        G, for a specific choice of local score. The delta-score is given by:
+        r"""Computes the delta-score of adding the edge $X_i \to X_j$ to $G$.
 
-            LocalScore(X_j | Pa_G(X_j) U X_i) - LocalScore(X_j | Pa_G(X_j))
+        $$
+        \mathrm{LocalScore}\big(X_j \mid \mathrm{Pa}_G(X_j) \cup \{X_i\}\big)
+        - \mathrm{LocalScore}\big(X_j \mid \mathrm{Pa}_G(X_j)\big)
+        $$
+
+        Only the target node $X_j$ is re-scored.
 
         Args:
-        - state: DAGEnvState, single state (no batch dim)
-        - action: DAGEnvAction, scalar action
-        - next_state: DAGEnvState, single next state (no batch dim)
-        - env_params: DAGEnvParams, params of environment (for num_variables)
-        - likelihood_params: params of the likelihood
+            state: Graph $G$ (single state, no batch dimension).
+            action: Scalar edge index `i * d + j`.
+            next_state: Graph $G'$ with the edge added.
+            env_params: Environment parameters (supply `num_variables`).
+            likelihood_params: Likelihood parameters produced by `init`.
 
         Returns:
-        - scalar delta-score
+            Scalar delta-score.
         """
         _source, target = jnp.divmod(action, env_params.num_variables)
         parents = state.adjacency_matrix[:, target]  # [num_variables]
@@ -84,20 +103,24 @@ class BaseDAGLikelihood(Generic[TDAGLikelihoodParams]):
         parents: chex.Array,
         likelihood_params: TDAGLikelihoodParams,
     ) -> TLogReward:
-        """Computes the local score LocalScore(X_j | Pa_G(X_j)).
+        r"""Computes local scores $\mathrm{LocalScore}(X_j \mid \mathrm{Pa}_G(X_j))$.
 
         Args:
-        - variables: chex.Array, shape [K], variables to score
-        - parents: chex.Array, shape [K, num_variables], mask of parents per variable
-        - likelihood_params: params of the likelihood
+            variables: Indices of the `K` variables to score, shape `[K]`.
+            parents: Boolean parent masks, shape `[K, num_variables]`.
+            likelihood_params: Likelihood parameters.
 
         Returns:
-        - chex.Array, shape [K], local scores
+            Local scores, shape `[K]`.
         """
         raise NotImplementedError
 
 
 class ZeroScore(BaseDAGLikelihood[BaseDAGLikelihoodParams]):
+    """Constant likelihood (every local score is `0`); with a uniform prior the target is
+    uniform over DAGs. Useful for testing.
+    """
+
     def init(self, rng_key: chex.PRNGKey, dummy_state: DAGEnvState) -> BaseDAGLikelihoodParams:
         return BaseDAGLikelihoodParams()
 
@@ -122,10 +145,36 @@ class ZeroScore(BaseDAGLikelihood[BaseDAGLikelihoodParams]):
 
 @chex.dataclass(frozen=True)
 class LinearGaussianScoreParams(BaseDAGLikelihoodParams):
+    """Parameters of the linear-Gaussian score.
+
+    Attributes:
+        data: Observations, shape `[num_samples, num_variables]`.
+    """
+
     data: chex.Array
 
 
 class LinearGaussianScore(BaseDAGLikelihood[LinearGaussianScoreParams]):
+    r"""Marginal likelihood of a linear-Gaussian Bayesian network.
+
+    Each variable is a linear function of its parents with Gaussian noise,
+    $X_j = \sum_{i \in \mathrm{Pa}(j)} w_{ij} X_i + \varepsilon_j$ with
+    $w_{ij} \sim \mathcal{N}(\mu_0, \sigma_0^2)$ and
+    $\varepsilon_j \sim \mathcal{N}(0, \sigma^2)$. The weights are integrated out in
+    closed form, giving a modular score (Deleu et al., 2022).
+
+    Args:
+        data: Observations of shape `[num_samples, num_variables]`, e.g. from
+            `gfnx.utils.dag.generate_dataset`.
+        prior_mean: Prior mean $\mu_0$ of the edge weights.
+        prior_scale: Prior standard deviation $\sigma_0$ of the edge weights.
+        obs_scale: Observation noise standard deviation $\sigma$.
+
+    References:
+        Deleu, T., et al. (2022). Bayesian structure learning with generative flow
+        networks. UAI.
+    """
+
     def __init__(
         self,
         data: chex.Array,
@@ -139,6 +188,7 @@ class LinearGaussianScore(BaseDAGLikelihood[LinearGaussianScoreParams]):
         self.obs_scale = obs_scale
 
     def init(self, rng_key: chex.PRNGKey, dummy_state: DAGEnvState) -> LinearGaussianScoreParams:
+        """Returns `LinearGaussianScoreParams` holding the data."""
         return LinearGaussianScoreParams(data=self.data)
 
     def _local_score(
@@ -169,11 +219,42 @@ class LinearGaussianScore(BaseDAGLikelihood[LinearGaussianScoreParams]):
 
 @chex.dataclass(frozen=True)
 class BGeScoreParams(BaseDAGLikelihoodParams):
+    """Precomputed sufficient statistics of the BGe score.
+
+    Attributes:
+        r_matrix: Posterior scatter matrix $R$, shape `[d, d]`.
+        log_gamma_term: Normalising terms indexed by the number of parents, shape `[d]`.
+    """
+
     r_matrix: chex.Array
     log_gamma_term: chex.Array
 
 
 class BGeScore(BaseDAGLikelihood[BGeScoreParams]):
+    r"""Bayesian Gaussian equivalent (BGe) score.
+
+    Marginal likelihood of a Gaussian Bayesian network under a normal-Wishart prior on
+    the mean and precision (Geiger & Heckerman, 1994). It is score-equivalent (Markov
+    equivalent DAGs get the same score) and modular. All data-dependent quantities are
+    precomputed at construction.
+
+    Args:
+        data: Observations of shape `[num_samples, num_variables]`.
+        mean_obs: Prior mean of the observations, shape `[num_variables]`; zeros if
+            `None`.
+        alpha_mu: Equivalent sample size $\alpha_\mu$ of the prior on the mean.
+        alpha_w: Degrees of freedom $\alpha_w$ of the Wishart prior; must exceed
+            `num_variables + 1`, so that
+            $t = \alpha_\mu (\alpha_w - d - 1) / (\alpha_\mu + 1) > 0$. Defaults to
+            `num_variables + 2`.
+
+    References:
+        Geiger, D., Heckerman, D. (1994). Learning Gaussian networks. UAI.
+
+        Kuipers, J., Moffa, G., Heckerman, D. (2014). Addendum on the scoring of Gaussian
+        directed acyclic graphical models. The Annals of Statistics, 42(4).
+    """
+
     def __init__(
         self,
         data: chex.Array,
@@ -215,6 +296,7 @@ class BGeScore(BaseDAGLikelihood[BGeScoreParams]):
         )
 
     def init(self, rng_key: chex.PRNGKey, dummy_state: DAGEnvState) -> BGeScoreParams:
+        """Returns the precomputed `BGeScoreParams`."""
         return BGeScoreParams(r_matrix=self.r_matrix, log_gamma_term=self.log_gamma_term)
 
     def _local_score(

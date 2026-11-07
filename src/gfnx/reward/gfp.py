@@ -1,3 +1,8 @@
+"""Proxy-model reward for the green fluorescent protein (GFP) environment.
+
+See [`GFPEnvironment`][gfnx.environment.gfp.GFPEnvironment].
+"""
+
 import os
 from typing import Any
 
@@ -12,10 +17,46 @@ from ..utils.proteins import PROTEINS_FULL_ALPHABET
 
 @chex.dataclass(frozen=True)
 class GFPRewardParams(BaseRewardParams):
+    """Parameters of the GFP reward.
+
+    Attributes:
+        model_params: Array leaves of the pretrained Equinox proxy regressor.
+    """
+
     model_params: Any
 
 
 class EqxProxyGFPRewardModule(BaseRewardModule[GFPEnvState, GFPEnvParams, GFPRewardParams]):
+    r"""Fluorescence predicted by a pretrained transformer regressor (experimental).
+
+    $$
+    R(x) = \max\big(f_\phi(x) + c,\; R_{\min}\big),
+    $$
+
+    where $f_\phi$ is a regressor trained on the GFP fluorescence dataset of Sarkisyan
+    et al. (2016) and $c$ is the offset stored with the model. No pretrained GFP proxy is
+    shipped yet: `proxy/weights/dummy_gfp` holds placeholder weights, and a real proxy is
+    trained with `python proxy/train_proxy.py --config-name gfp`.
+
+    Args:
+        proxy_config_path: Path to the Hydra/OmegaConf config used to train the proxy
+            (its `network` section defines the architecture), e.g.
+            `"proxy/configs/gfp.yaml"`. Resolved relative to the working directory.
+        pretrained_proxy_path: Orbax checkpoint directory, e.g.
+            `"proxy/weights/gfp/model"`. Relative paths are resolved against the
+            repository root, so use a repository checkout (editable install) or pass an
+            absolute path.
+        reward_exponent: Stored for API symmetry with the AMP reward; currently unused.
+        min_reward: Lower clip $R_{\min}$.
+
+    References:
+        Madan, K., et al. (2023). Learning GFlowNets from partial episodes for improved
+        convergence and stability. ICML.
+
+        Sarkisyan, K., et al. (2016). Local fitness landscape of the green fluorescent
+        protein. Nature, 533.
+    """
+
     def __init__(
         self,
         proxy_config_path: str,
@@ -23,9 +64,6 @@ class EqxProxyGFPRewardModule(BaseRewardModule[GFPEnvState, GFPEnvParams, GFPRew
         reward_exponent: float = 1.0,
         min_reward: float = 1e-6,
     ):
-        """
-        Proxy reward model for amp
-        """
         # Load config to a proxy model
         import omegaconf
 
@@ -43,6 +81,21 @@ class EqxProxyGFPRewardModule(BaseRewardModule[GFPEnvState, GFPEnvParams, GFPRew
         self.min_reward = min_reward
 
     def init(self, rng_key: chex.PRNGKey, dummy_state: GFPEnvState) -> GFPRewardParams:
+        """Restores the pretrained proxy network.
+
+        Builds an `EqxTransformerRewardModel` from the `network` section of the config,
+        restores its weights from `pretrained_proxy_path` with Orbax, and splits it into
+        arrays (returned as `reward_params`) and static structure (stored on the module
+        as `model_static`). `reward` therefore only works on a module whose `init` has
+        been called. Requires `equinox` and `orbax-checkpoint` (the `baselines` extra).
+
+        Args:
+            rng_key: Key used to build the network skeleton before restoring weights.
+            dummy_state: Unused.
+
+        Returns:
+            Reward parameters holding the proxy weights.
+        """
         # Lazy imports to avoid importing equinox in the main module
         import equinox as eqx
         import orbax.checkpoint as ocp
@@ -68,9 +121,19 @@ class EqxProxyGFPRewardModule(BaseRewardModule[GFPEnvState, GFPEnvParams, GFPRew
         return GFPRewardParams(model_params=model_params)
 
     def log_reward(self, state: GFPEnvState, reward_params: GFPRewardParams) -> TLogReward:
+        r"""Computes $\log R(x)$ (log of `reward`)."""
         return jnp.log(self.reward(state, reward_params))
 
     def reward(self, state: GFPEnvState, reward_params: GFPRewardParams) -> TReward:
+        """Runs the proxy on `state.tokens` (dropout off) and returns the clipped reward.
+
+        Args:
+            state: Terminal GFP state.
+            reward_params: Proxy weights returned by `init`.
+
+        Returns:
+            Scalar reward, at least `min_reward`.
+        """
         # Lazy imports to avoid importing equinox in the main module
         import equinox as eqx
 
