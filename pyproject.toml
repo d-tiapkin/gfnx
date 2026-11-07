@@ -8,7 +8,7 @@ sources = ["src"]
 
 [project]
 name = "gfnx"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
   "jax>=0.4.27.0,<0.10.0",
   "jaxlib>=0.4.27.0,<0.10.0",

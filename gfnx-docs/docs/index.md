@@ -55,6 +55,7 @@ For more context on the available environments, metrics, and baselines, continue
 - [Metrics](metrics/index.md)
 - [Baselines](baselines.md)
 - [Walkthrough](walkthrough.md)
+- [Migrating from 0.0.x](migration.md)
 
 ## Support
 
