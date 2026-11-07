@@ -10,11 +10,11 @@ sources = ["src"]
 name = "gfnx"
 version = "0.0.1"
 dependencies = [
-  "jax>=0.10.0,<0.13.0",
-  "jaxlib>=0.10.0,<0.13.0",
+  "jax>=0.11.0,<0.13.0",
+  "jaxlib>=0.11.0,<0.13.0",
   "chex",
   "flashbax",
-  "numpy>=2.0",
+  "numpy>=2.1",
   "jax_tqdm",
   "jaxtyping",
   "networkx",
@@ -33,11 +33,11 @@ authors = [
 license = "MIT"
 description = "Environments for Generative Flow Networks in JAX"
 readme = "README.md"
-requires-python = ">=3.11"
+# <3.15: flashbax needs tensorstore, which has no Python 3.15 wheels yet.
+requires-python = ">=3.12,<3.15"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -60,7 +60,7 @@ baselines = [
   "jraph"
 ]
 cuda12 = [
-  "jax[cuda12]>=0.10.0,<0.13.0",
+  "jax[cuda12]>=0.11.0,<0.13.0",
 ]
 tests = [
   "pytest",
@@ -83,7 +83,7 @@ exclude = [
 ]
 line-length = 99
 indent-width = 4
-target-version = "py311"
+target-version = "py312"
 
 
 [tool.ruff.lint]
@@ -91,7 +91,12 @@ target-version = "py311"
 # overlap with the use of a formatter, like Black, but we can override this behavior by
 # explicitly adding the rule.
 extend-select = ["E501"]
-ignore = [ "F722" ]
+ignore = [
+    "F722",
+    # PEP 695 generics (py312 target): keep the `Generic[...]`/TypeVar style for now.
+    "UP046",
+    "UP047",
+]
 
 
 [tool.ruff.lint.pydocstyle]

@@ -25,16 +25,19 @@ gfnx/
 └── tests/                 # Test suite
 ```
 
-**Supported versions**: Python 3.11–3.14 (`requires-python = ">=3.11"`), numpy ≥ 2.0,
-jax/jaxlib `>=0.10.0,<0.13.0`. jax 0.10 is the first release requiring numpy 2 and the floor
-sets the Python floor (jax ≥ 0.7 dropped 3.10; jax ≥ 0.11 needs 3.12, so 3.11 resolves to jax
-0.10.x). CI tests environments on 3.11–3.14 and baselines on 3.11 and 3.14.
+**Supported versions**: Python 3.12–3.14 (`requires-python = ">=3.12,<3.15"`), numpy ≥ 2.1,
+jax/jaxlib `>=0.11.0,<0.13.0`. jax 0.11 is the first release requiring Python 3.12 (and numpy
+2.1), so the jax floor and the Python floor match. CI tests environments on 3.12–3.14 and
+baselines on 3.12 and 3.14.
 - **Hydra on 3.14**: hydra-core 1.3.x crashes at startup on Python 3.14 (argparse rejects its
   help strings), so the `baselines` extra requires `hydra-core>=1.4.0rc3` there (a release
   candidate) via a `python_version` marker. It pulls in omegaconf 2.4, where `DictConfig` is
   unhashable — see `FrozenConfig` below.
 - **Python 3.15** is blocked upstream: `flashbax` needs `tensorstore`, which has no cp315 wheels
-  yet and does not build from source.
+  yet and does not build from source. Hence the `<3.15` cap in `requires-python`; lift it (and add
+  3.15 to CI) once tensorstore ships cp315 wheels.
+- **Ruff `target-version = "py312"`** enables preview rules UP046/UP047 (PEP 695 generics). They
+  are ignored in `pyproject.toml`; the codebase keeps the `Generic[...]`/`TypeVar` style.
 
 **Design philosophy**: follows CleanRL's "single-file" approach — each baseline is a self-contained, hackable script. Full end-to-end JIT compilation in the style of purejaxrl.
 

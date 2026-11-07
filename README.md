@@ -2,7 +2,7 @@
 
 <p align="center">
        <a href="https://www.python.org/doc/versions/">
-        <img src="https://img.shields.io/badge/python->=3.11-blue" /></a>
+        <img src="https://img.shields.io/badge/python-3.12--3.14-blue" /></a>
        <a href="https://pypi.org/project/gfnx/">
         <img src="https://img.shields.io/badge/pypi_package-0.0.1-brightgreen" /></a>
        <a href="https://arxiv.org/abs/2511.16592">
@@ -23,7 +23,7 @@
 
 ### Requirements
 
-- Python 3.11 or newer.
+- Python 3.12, 3.13 or 3.14.
 - A working JAX installation. CPU works out of the box; for GPU/TPU accelerators follow the [official JAX installation guide](https://jax.readthedocs.io/en/latest/installation.html).
 
 ### Install the latest release
