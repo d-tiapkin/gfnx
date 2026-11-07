@@ -33,6 +33,7 @@ from gfnx.metrics import (
     EUBOMetricsModule,
     MultiMetricsModule,
     MultiMetricsState,
+    OnPolicyFCSMetricsModule,
     SWExpectedRewardMetricsModule,
 )
 
@@ -295,6 +296,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
                     reward_params=train_state.reward_params,
                 ),
                 "rd": SWExpectedRewardMetricsModule.ProcessArgs(),
+                "fcs": OnPolicyFCSMetricsModule.ProcessArgs(
+                    policy_params=policy_params,
+                    env_params=train_state.env_params,
+                    reward_params=train_state.reward_params,
+                ),
             }
         ),
         eval_each=train_state.config.logging.eval_each,
@@ -459,6 +465,16 @@ def run_experiment(cfg: OmegaConf) -> None:
                 reward_module=reward_module,
                 reward_params=reward_params,
                 buffer_size=cfg.logging.metric_buffer_size,
+            ),
+            "fcs": OnPolicyFCSMetricsModule(
+                env=env,
+                reward_module=reward_module,
+                fwd_policy_fn=fwd_policy_fn,
+                bwd_policy_fn=bwd_policy_fn,
+                subset_size=cfg.metrics.fcs.subset_size,
+                n_subsets=cfg.metrics.fcs.n_subsets,
+                n_rounds=cfg.metrics.fcs.n_rounds,
+                batch_size=cfg.metrics.fcs.batch_size,
             ),
         }
     )

@@ -284,6 +284,6 @@ def test_step_inside_multimetrics_under_jit(setup):
 
     prev = {"fcs/fcs": jnp.array(-1.0)}
     _, info = step(1, state, prev)  # not an eval step
-    assert float(info["fcs/fcs"]) == -1.0
+    assert jnp.array_equal(info["fcs/fcs"], prev["fcs/fcs"])
     _, info = step(2, state, prev)  # eval step
     assert 0.0 <= float(info["fcs/fcs"]) <= 1.0

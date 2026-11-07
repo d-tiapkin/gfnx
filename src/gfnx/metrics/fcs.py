@@ -153,13 +153,13 @@ class BaseFCSMetricsModule(BaseMetricsModule):
         batch_size: int | None = None,
         deduplicate: bool = True,
     ):
-        """Initialize the FCS metric module.
+        r"""Initialize the FCS metric module.
 
         Args:
             env: Environment instance.
             reward_module: Reward module used to score the subset elements.
             bwd_policy_fn: Backward policy function for estimating $p_T$.
-            subset_size: Maximum subset size $\\beta \\geq 2$.
+            subset_size: Maximum subset size $\beta \geq 2$.
             n_subsets: Number of subsets averaged per evaluation.
             n_rounds: Backward trajectories per terminal state.
             batch_size: Backward rollouts run in parallel. Defaults to `subset_size`.
@@ -303,14 +303,14 @@ class OnPolicyFCSMetricsModule(BaseFCSMetricsModule):
         batch_size: int | None = None,
         deduplicate: bool = True,
     ):
-        """Initialize the on-policy FCS metric module.
+        r"""Initialize the on-policy FCS metric module.
 
         Args:
             env: Environment instance.
             reward_module: Reward module used to score the subset elements.
             fwd_policy_fn: Forward policy used to sample the subsets.
             bwd_policy_fn: Backward policy function for estimating $p_T$.
-            subset_size: Number of forward rollouts per subset ($\\beta \\geq 2$).
+            subset_size: Number of forward rollouts per subset ($\beta \geq 2$).
             n_subsets: Number of subsets averaged per evaluation.
             n_rounds: Backward trajectories per terminal state.
             batch_size: Backward rollouts run in parallel. Defaults to `subset_size`.

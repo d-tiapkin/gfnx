@@ -34,6 +34,11 @@ environment:
 metrics:
   num_traj: 512
   batch_size : 16
+  fcs: # Flow consistency in sub-graphs (Silva et al., ICLR 2025)
+    subset_size: 128 # forward rollouts per subset (beta)
+    n_subsets: 4 # 512 rollouts, as many as the top-k metric
+    n_rounds: 1 # one trajectory per sequence, so p_T is exact
+    batch_size: 128 # backward rollouts run in parallel
 
 logging:
   track_each: 1 # in terms of total training steps, not divited by num_envs
