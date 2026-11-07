@@ -33,6 +33,10 @@ Some environments require bespoke objectives or training tweaks. These live alon
 
 The walkthrough page contains a short proof-of-concept guide to this pattern: see [Vmapping training over seeds](walkthrough.md#vmapping-training-over-seeds-proof-of-concept).
 
+## Evaluation metrics
+
+Each script logs its evaluation metrics under `eval/` every `logging.eval_each` steps. Most baselines also report [flow consistency in sub-graphs](metrics/fcs.md#in-the-baselines) (`eval/fcs/fcs`), configured under `metrics.fcs`; the FCS page lists which ones.
+
 ## How to run a baseline
 
 1. Install the package with baseline extras: `pip install -e '.[baselines]'`.

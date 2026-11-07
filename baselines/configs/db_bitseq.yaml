@@ -35,6 +35,11 @@ metrics:
   n_rounds : 10
   batch_size : 7200
   mode_threshold : 30
+  fcs: # Flow consistency in sub-graphs (Silva et al., ICLR 2025)
+    subset_size: 128 # forward rollouts per subset (beta)
+    n_subsets: 32
+    n_rounds: 10 # backward trajectories per state for the p_T estimate
+    batch_size: 4096 # backward rollouts run in parallel
 
 logging:
   track_each: 1 # in terms of total training steps, not divided by num_envs

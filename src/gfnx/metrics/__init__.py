@@ -18,6 +18,15 @@ from .correlation import (
 from .elbo import ELBOMetricsModule, ELBOMetricState
 from .eubo import EUBOMetricsModule, EUBOMetricState
 from .exact_distribution import ExactDistributionMetricsModule, ExactDistributionMetricsState
+from .fcs import (
+    BaseFCSMetricsModule,
+    FCSMetricsState,
+    OnPolicyFCSMetricsModule,
+    TestFCSMetricsModule,
+    TestFCSMetricsState,
+    first_occurrence_mask,
+    subset_total_variation,
+)
 from .modes import (
     AccumulatedModesMetricsModule,
     AccumulatedModesMetricsState,
@@ -55,6 +64,14 @@ __all__ = [
     # Evidence Upper Bound
     "EUBOMetricsModule",
     "EUBOMetricState",
+    # Flow Consistency in Sub-graphs
+    "BaseFCSMetricsModule",
+    "FCSMetricsState",
+    "OnPolicyFCSMetricsModule",
+    "TestFCSMetricsModule",
+    "TestFCSMetricsState",
+    "first_occurrence_mask",
+    "subset_total_variation",
     # Mode tracking metrics
     "AccumulatedModesMetricsModule",
     "AccumulatedModesMetricsState",

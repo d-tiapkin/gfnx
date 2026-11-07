@@ -7,6 +7,13 @@
       show_root_heading: false
       heading_level: 3
 
+## Marginal estimation
+
+::: gfnx.utils.marginal
+    options:
+      show_root_heading: false
+      heading_level: 3
+
 ## Masking helpers
 
 ::: gfnx.utils.masking

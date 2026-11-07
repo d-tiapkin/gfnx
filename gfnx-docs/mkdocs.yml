@@ -97,6 +97,7 @@ nav:
           - On-policy: metrics/correlation/on_policy.md
       - ELBO: metrics/elbo.md
       - EUBO: metrics/eubo.md
+      - Flow consistency in sub-graphs (FCS): metrics/fcs.md
       - Mean reward & reward delta: metrics/reward_delta.md
       - Mode coverage: metrics/modes.md
       - Top-K: metrics/top_k.md

@@ -45,6 +45,11 @@ metrics:
   n_rounds: 32
   n_terminal_states: 32
   batch_size: 32
+  fcs: # Flow consistency in sub-graphs (Silva et al., ICLR 2025)
+    subset_size: 32 # forward rollouts per subset (beta)
+    n_subsets: 8 # kept small: phylo rollouts are expensive
+    n_rounds: 8 # backward trajectories per state for the p_T estimate
+    batch_size: 64 # backward rollouts run in parallel
 
 logging:
   track_each: 1
