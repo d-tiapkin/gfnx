@@ -9,7 +9,7 @@ import jax.numpy as jnp
 from gfnx.utils.distances import jensen_shannon_divergence, kl_divergence, total_variation_distance
 from gfnx.utils.rollout import TPolicyFn
 
-from ..base import TEnvironment, TEnvParams, TEnvState, TRewardModule
+from ..base import BaseEnvironment, TEnvironment, TEnvParams, TEnvState, TRewardModule
 from ..utils.rollout import TPolicyParams
 from .base import (
     BaseInitArgs,
@@ -86,6 +86,11 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
         "jsd": jensen_shannon_divergence,
         "2d_marginal_distribution": marginal_distribution,
     }
+    _required_env_methods: ClassVar[tuple[str, ...]] = (
+        "get_all_states",
+        "state_to_index",
+        "get_true_distribution",
+    )
 
     def __init__(
         self,
@@ -112,11 +117,24 @@ class ExactDistributionMetricsModule(BaseMetricsModule):
             tol_epsilon: Tolerance for convergence in distribution computation.
 
         Raises:
-            ValueError: If the environment is not enumerable or not topologically sortable,
+            ValueError: If the environment is not enumerable, does not implement
+                ``get_all_states``, ``state_to_index`` and ``get_true_distribution``,
                 or if ``metrics`` is invalid or contains unsupported entries.
         """
         if not env.is_enumerable:
             raise ValueError(f"Environment {env.name} is not enumerable")
+        # ``is_enumerable`` alone is not enough: some enumerable environments (e.g. TFBind8,
+        # QM9Small) only enumerate terminal states and lack the per-state helpers used here.
+        missing = [
+            name
+            for name in self._required_env_methods
+            if getattr(type(env), name) is getattr(BaseEnvironment, name)
+        ]
+        if missing:
+            raise ValueError(
+                f"Environment {env.name} does not implement {', '.join(missing)}, which "
+                f"{type(self).__name__} requires. Use ApproxDistributionMetricsModule instead."
+            )
         if not isinstance(metrics, list) or not all(isinstance(m, str) for m in metrics):
             raise ValueError("metrics must be a list of strings")
         if not all(m in self._supported_metrics for m in metrics):
