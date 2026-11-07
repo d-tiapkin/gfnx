@@ -14,7 +14,7 @@
 
 ### Requirements
 
-- Python 3.10 or newer.
+- Python 3.12, 3.13 or 3.14.
 - A working JAX installation. CPU works out of the box; for GPU/TPU accelerators follow the [official JAX installation guide](https://jax.readthedocs.io/en/latest/installation.html).
 
 ### Install the latest release

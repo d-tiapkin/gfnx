@@ -23,6 +23,7 @@ import jraph
 import optax
 from omegaconf import OmegaConf
 from utils.checkpoint import save_checkpoint
+from utils.config import FrozenConfig, freeze_config
 from utils.logger import Writer
 
 import gfnx
@@ -282,7 +283,7 @@ class GNNPolicy(eqx.Module):
 # Define the train state that will be used in the training loop
 class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
-    config: OmegaConf
+    config: FrozenConfig
     env: gfnx.DAGEnvironment
     env_params: gfnx.DAGEnvParams
     exploration_schedule: optax.Schedule
@@ -724,7 +725,7 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     train_state = TrainState(
         rng_key=rng_key,
-        config=cfg,
+        config=freeze_config(cfg),
         env=env,
         env_params=env_params,
         exploration_schedule=exploration_schedule,

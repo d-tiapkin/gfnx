@@ -23,6 +23,7 @@ import optax
 from jaxtyping import Array, Int
 from omegaconf import OmegaConf
 from utils.checkpoint import save_checkpoint
+from utils.config import FrozenConfig, freeze_config
 from utils.logger import Writer
 
 import gfnx
@@ -103,7 +104,7 @@ class TransformerPolicy(eqx.Module):
 # Define the train state that will be used in the training loop
 class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
-    config: OmegaConf
+    config: FrozenConfig
     env: gfnx.AMPEnvironment
     env_params: gfnx.AMPEnvParams
     reward_module: gfnx.EqxProxyAMPRewardModule
@@ -467,7 +468,7 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     train_state = TrainState(
         rng_key=rng_key,
-        config=cfg,
+        config=freeze_config(cfg),
         env=env,
         env_params=env_params,
         reward_module=reward_module,
