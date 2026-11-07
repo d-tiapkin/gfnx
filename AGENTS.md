@@ -535,6 +535,7 @@ All metrics follow a functional `init -> update -> process -> get` pattern, with
 | `ELBOMetricsModule` | ELBO = E[log R(x) − log P_θ(x)] | Forward rollouts |
 | `EUBOMetricsModule` | EUBO = E[log P_B − log P_F + log R] | Backward rollouts from test set |
 | `CorrelationMetricsModule` | Pearson/Spearman of P̂_θ(x) vs R(x) | Monte Carlo estimate: P̂_θ(x) = (1/N) Σ P_F(τ)/P_B(τ|x), τ~P_B(·|x) |
+| `OnPolicyFCSMetricsModule` / `TestFCSMetricsModule` | FCS = E_S[TV(p_T^(S), R^(S))], TV between p_T and R restricted to random subsets S (Silva et al., ICLR 2025) | S = deduplicated terminal states of a batch of forward rollouts (on-policy) or a uniform subset of a fixed test set; P̂_θ(x) via `gfnx.utils.estimate_marginal_log_probs` |
 | `ExpectedRewardMetricsModule` / `SWExpectedRewardMetricsModule` | Tracks empirical mean reward vs. ground-truth `env.get_expected_reward` | Running sum or sliding window |
 | `MultiMetricsModule` | Composes any dict of the above | — |
 
@@ -553,7 +554,7 @@ metrics_state, eval_info = metrics_module.step(
 ```
 Runs `update()` every step; runs `process()` + `get()` only on eval steps (using `jax.lax.cond` — stays JIT-compatible). Returns `prev_eval_info` unchanged on non-eval steps.
 
-**Reward in metrics**: `EUBOMetricsModule` and `CorrelationMetricsModule` take `reward_module` at construction time (for one-shot operations like logZ estimation and test set sampling). `reward_params` is passed at each evaluation via `ProcessArgs` — it is NOT stored as a class field, since it can be large or trainable:
+**Reward in metrics**: `EUBOMetricsModule`, `CorrelationMetricsModule` and the FCS modules take `reward_module` at construction time (for one-shot operations like logZ estimation and test set sampling). `reward_params` is passed at each evaluation via `ProcessArgs` — it is NOT stored as a class field, since it can be large or trainable:
 ```python
 EUBOMetricsModule(env=env, env_params=env_params,
                   reward_module=reward_module, reward_params=reward_params, ...)

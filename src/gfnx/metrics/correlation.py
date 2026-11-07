@@ -8,13 +8,8 @@ import jax.numpy as jnp
 
 from ..base import TEnvironment, TEnvParams, TEnvState, TRewardModule, TRewardParams
 from ..utils.corr import pearson_corr, spearman_corr
-from ..utils.rollout import (
-    TPolicyFn,
-    TPolicyParams,
-    backward_rollout,
-    backward_trajectory_log_probs,
-    forward_rollout,
-)
+from ..utils.marginal import estimate_marginal_log_probs
+from ..utils.rollout import TPolicyFn, TPolicyParams, forward_rollout
 from .base import BaseInitArgs, BaseMetricsModule, BaseProcessArgs, EmptyUpdateArgs, MetricsState
 
 
@@ -235,62 +230,19 @@ class BaseCorrelationMetricsModule(BaseMetricsModule):
                 across all sampling rounds
 
         Note:
-            The method uses jax.lax.scan for efficient computation across batches
-            and rounds. Log-ratios are computed using backward_trajectory_log_probs
-            and averaged using logsumexp for numerical stability.
+            Delegates to `gfnx.utils.estimate_marginal_log_probs`, which scans over
+            batches and rounds and averages the ratios with logsumexp.
         """
-        n_terminal_states = terminal_states.is_pad.shape[0]
-        # Pad to a multiple of batch_size if needed
-        remainder = n_terminal_states % self.batch_size
-        if remainder != 0:
-            pad_width = self.batch_size - remainder
-            terminal_states = jax.tree.map(
-                lambda x: jnp.pad(
-                    x, ((0, pad_width),) + ((0, 0),) * (x.ndim - 1), mode="constant"
-                ),
-                terminal_states,
-            )
-        # Use additional batches to avoid OOM
-        terminal_states = jax.tree.map(
-            lambda x: x.reshape(-1, self.batch_size, *x.shape[1:]),
-            terminal_states,
+        return estimate_marginal_log_probs(
+            rng_key=rng_key,
+            terminal_states=terminal_states,
+            bwd_policy_fn=self.bwd_policy_fn,
+            policy_params=policy_params,
+            env=self.env,
+            env_params=env_params,
+            n_rounds=self.n_rounds,
+            batch_size=self.batch_size,
         )
-
-        def process_batch(rng_key, terminal_states):
-            """Process a single batch of terminal states."""
-            rng_key, rollout_key = jax.random.split(rng_key)
-            rng_keys_bwd = jax.random.split(rollout_key, self.batch_size)
-            bwd_traj_data, _, _ = jax.vmap(
-                lambda rng, s: backward_rollout(
-                    rng, s, self.bwd_policy_fn, policy_params, self.env, env_params
-                ),
-                in_axes=(0, 0),
-            )(rng_keys_bwd, terminal_states)
-            log_pf_traj, log_pb_traj = jax.vmap(
-                lambda td: backward_trajectory_log_probs(self.env, td, env_params)
-            )(bwd_traj_data)
-            log_ratio_traj = log_pf_traj - log_pb_traj
-            return rng_key, log_ratio_traj
-
-        def process_round(carry: tuple[chex.PRNGKey, TEnvState], xs: None):
-            """Process a single round of sampling across all batches."""
-            rng_key, terminal_states = carry
-            rng_key, log_ratio_traj = jax.lax.scan(process_batch, rng_key, terminal_states)
-            chex.assert_shape(log_ratio_traj, terminal_states.is_pad.shape[:2])
-            return (rng_key, terminal_states), log_ratio_traj.reshape(-1)
-
-        _, log_ratio_traj = jax.lax.scan(
-            process_round,
-            (rng_key, terminal_states),
-            xs=None,
-            length=self.n_rounds,
-        )
-        log_ratio_traj = log_ratio_traj[:, :n_terminal_states]
-        chex.assert_shape(log_ratio_traj, (self.n_rounds, n_terminal_states))
-
-        # Average ratios over rounds for each test datum using log-sum-exp
-        log_ratio_traj = jax.nn.logsumexp(log_ratio_traj, axis=0)
-        return log_ratio_traj - jnp.log(self.n_rounds)
 
 
 class OnPolicyCorrelationMetricsModule(BaseCorrelationMetricsModule):
