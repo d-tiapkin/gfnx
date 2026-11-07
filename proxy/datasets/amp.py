@@ -8,7 +8,6 @@ repository, as the data files are stored using git-lfs.
 To install git-lfs, follow the instructions here: https://git-lfs.github.com/
 """
 
-
 import chex
 import jax.numpy as jnp
 import numpy as np

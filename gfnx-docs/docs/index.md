@@ -4,8 +4,10 @@
 
 ## Highlights
 
-- End-to-end JAX implementations of GFlowNet building blocks (environments, reward modules, networks, and metrics).
-- Ready-to-run baseline agents inspired by the [CleanRL](https://github.com/vwxyzjn/cleanrl) style of concise single-file experiments.
+- End-to-end JAX implementations of GFlowNet building blocks (environments, reward modules, networks, and metrics) — the full training pipeline JIT-compiles and runs on accelerator with no CPU↔GPU bouncing.
+- A *decoupled* environment / reward API: environments expose only dynamics; reward modules are constructed and parameterised separately so they can be swapped or trained jointly with the policy.
+- Single-state primitives (`env.step`, `env.reset`, `forward_rollout`) plus a uniform `True = valid` mask convention — `jax.vmap` provides batching and seed parallelism for free.
+- Ready-to-run baseline agents inspired by the [CleanRL](https://github.com/vwxyzjn/cleanrl) style of concise single-file experiments, including vmap-over-seeds variants.
 - Utilities for logging, checkpointing, and evaluation that make it easy to compare runs and extend the library with new research code.
 
 ## Installation

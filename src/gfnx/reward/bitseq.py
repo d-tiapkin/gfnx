@@ -1,4 +1,4 @@
-"""Reward functions used for hypergrid environment"""
+"""Reward functions used for bitseq environment"""
 
 import chex
 import jax
@@ -6,12 +6,17 @@ import jax.numpy as jnp
 
 from gfnx.utils.distances import hamming_distance
 
-from ..base import BaseRewardModule, TLogReward, TReward, TRewardParams
+from ..base import BaseRewardModule, BaseRewardParams, TLogReward, TReward
 from ..environment import BitseqEnvParams, BitseqEnvState
 from ..utils.bitseq import construct_mode_set, detokenize
 
 
-class BitseqRewardModule(BaseRewardModule[BitseqEnvState, BitseqEnvParams]):
+@chex.dataclass(frozen=True)
+class BitseqRewardParams(BaseRewardParams):
+    mode_set: chex.Array
+
+
+class BitseqRewardModule(BaseRewardModule[BitseqEnvState, BitseqEnvParams, BitseqRewardParams]):
     def __init__(
         self,
         sentence_len: int = 120,
@@ -39,30 +44,25 @@ class BitseqRewardModule(BaseRewardModule[BitseqEnvState, BitseqEnvParams]):
         self.mode_set_size = mode_set_size
         self.reward_exponent = reward_exponent
 
-    def init(self, rng_key: chex.PRNGKey, dummy_state: BitseqEnvState) -> TRewardParams:
-        return {
-            "mode_set": construct_mode_set(
+    def init(self, rng_key: chex.PRNGKey, dummy_state: BitseqEnvState) -> BitseqRewardParams:
+        return BitseqRewardParams(
+            mode_set=construct_mode_set(
                 self.sentence_len,
                 self.block_len,
                 self.block_set,
                 self.mode_set_size,
                 rng_key,
             )
-        }
+        )
 
     def _mode_set_distance(self, s: chex.Array, mode_set: chex.Array):
         distances = jax.vmap(lambda ms: hamming_distance(s, ms))(mode_set)
         return jnp.min(distances)
 
-    def log_reward(self, state: BitseqEnvState, env_params: BitseqEnvParams) -> TLogReward:
-        def single_log_reward(tokens: chex.Array, reward_params: TRewardParams):
-            bitseq = detokenize(tokens, self.k)
-            mode_dist = self._mode_set_distance(bitseq, reward_params["mode_set"])
-            return -self.reward_exponent * mode_dist.astype(jnp.float32) / bitseq.shape[0]
+    def log_reward(self, state: BitseqEnvState, reward_params: BitseqRewardParams) -> TLogReward:
+        bitseq = detokenize(state.tokens, self.k)
+        mode_dist = self._mode_set_distance(bitseq, reward_params.mode_set)
+        return -self.reward_exponent * mode_dist.astype(jnp.float32) / bitseq.shape[0]
 
-        return jax.vmap(single_log_reward, in_axes=(0, None))(
-            state.tokens, env_params.reward_params
-        )
-
-    def reward(self, state: BitseqEnvState, env_params: BitseqEnvParams) -> TReward:
-        return jnp.exp(self.log_reward(state, env_params))
+    def reward(self, state: BitseqEnvState, reward_params: BitseqRewardParams) -> TReward:
+        return jnp.exp(self.log_reward(state, reward_params))

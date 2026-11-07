@@ -68,35 +68,46 @@ Intermediate states (incomplete spin assignments) are typically assigned a rewar
 
 The `IsingRewardModule` encapsulates this computation:
 
-* It maintains `J`, the interaction matrix, as part of its parameters.
-* It computes the log-reward as
+* The interaction matrix `J` lives inside `IsingRewardParams(J=...)` — i.e. as
+  part of the **trainable** reward parameters, not as a constant attribute on
+  the module.
+* The log-reward is computed as
 
   ```python
   canonical = 2 * state.state - 1
-  log_reward = jnp.einsum("bi,ij,bj->b", canonical, J, canonical)
+  log_reward = canonical @ J @ canonical
   ```
 * The full reward is obtained via `exp(log_reward)`.
 
-This setup allows the energy model to be updated during training, enabling joint learning of the generative policy and the underlying energy function.
+Because `J` is part of `reward_params`, it can be jointly updated with the
+GFlowNet policy during training. This is exactly what `baselines/tb_ising.py`
+does: after each EBM step the train state replaces `reward_params` with the
+updated matrix (`reward_params.replace(J=new_ebm.J)`).
 
 ## Example usage
 
 ```python
 import jax
 import gfnx
+from gfnx import IsingEnvironment, IsingRewardModule
 
-from gfnx.environment.ising import IsingEnvironment, IsingRewardModule
+# 1. Build the reward module separately.
+reward_module = IsingRewardModule()
 
-reward = IsingRewardModule()
-env = IsingEnvironment(reward_module=reward, dim=100)  # 10x10 lattice
-params = env.init(jax.random.PRNGKey(0))
+# 2. Build the environment (no reward attached).
+env = IsingEnvironment(dim=100)  # 10x10 lattice
+env_params = env.init(jax.random.PRNGKey(0))
 
-obs, state = env.reset(num_envs=1, env_params=params)
+# 3. Initialise reward parameters — J is sampled / set here.
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
+
+# 4. Reset to a single initial state.
+state = env.reset()
 ```
 
-Just like other GFNX environments, `IsingEnvironment` is fully vectorised:
-set `num_envs > 1` to roll out multiple forests in parallel. When a trajectory
-terminates the returned `log_reward` corresponds to the expression above.
+All environment methods operate on a single state — wrap them in `jax.vmap`
+to roll out many configurations in parallel. The log-reward is computed
+post-rollout via `reward_module.log_reward(state, reward_params)`.
 
 ## API references:
 

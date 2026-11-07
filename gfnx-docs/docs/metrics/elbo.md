@@ -26,7 +26,13 @@ $$
 
 - `env`: Environment for which metric is computed.
 - `env_params`: Environment parameters used for trajectory generation.
-- `fwd_policy_fn`: Forward policy function for generating trajectories.
+- `reward_module` / `reward_params`: Reward used to compute log rewards and (when
+  tractable) the normalising constant `log Z` cached at construction time. The
+  current `reward_params` must also be passed via `ProcessArgs` at every
+  evaluation step (they may be trainable, e.g. for Ising).
+- `fwd_policy_fn`: Forward policy function for generating trajectories. The
+  policy operates on a **single** observation (no batch dim) — `gfnx.utils.forward_rollout`
+  vmaps it internally for the metric.
 - `n_rounds`: Number of sampling rounds for statistical stability.
 - `batch_size`: Batch size used when evaluating policy over states.
 
@@ -39,8 +45,11 @@ import jax
 import jax.numpy as jnp
 import gfnx
 
-env = gfnx.HypergridEnvironment(reward_module=gfnx.EasyHypergridRewardModule())
-params = env.init(jax.random.PRNGKey(0))
+# Environment and reward are fully decoupled.
+reward_module = gfnx.EasyHypergridRewardModule(side=20)
+env = gfnx.HypergridEnvironment()
+env_params = env.init(jax.random.PRNGKey(0))
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
 policy_params = {
     "forward_num_actions": env.action_space.n,
@@ -49,16 +58,17 @@ policy_params = {
 
 
 def uniform_forward_policy(rng_key, obs, policy_params):
-    batch = obs.shape[0]
-    forward_logits = jnp.zeros((batch, policy_params["forward_num_actions"]), dtype=jnp.float32)
-    backward_logits = jnp.zeros((batch, policy_params["backward_num_actions"]), dtype=jnp.float32)
+    forward_logits = jnp.zeros((policy_params["forward_num_actions"],), dtype=jnp.float32)
+    backward_logits = jnp.zeros((policy_params["backward_num_actions"],), dtype=jnp.float32)
     info = {"forward_logits": forward_logits, "backward_logits": backward_logits}
     return forward_logits, info
 
 
 metrics = gfnx.metrics.ELBOMetricsModule(
     env=env,
-    env_params=params,
+    env_params=env_params,
+    reward_module=reward_module,
+    reward_params=reward_params,
     fwd_policy_fn=uniform_forward_policy,
     n_rounds=16,
     batch_size=128,
@@ -68,7 +78,11 @@ state = metrics.init(jax.random.PRNGKey(1), metrics.InitArgs())
 state = metrics.process(
     state,
     jax.random.PRNGKey(2),
-    metrics.ProcessArgs(policy_params=policy_params, env_params=params),
+    metrics.ProcessArgs(
+        policy_params=policy_params,
+        env_params=env_params,
+        reward_params=reward_params,
+    ),
 )
 elbo = metrics.get(state)["elbo"]
 print(float(elbo))

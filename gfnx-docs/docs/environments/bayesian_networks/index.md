@@ -86,17 +86,29 @@ from gfnx.reward.dag_prior import UniformDAGPrior
 num_variables = 5
 data_path = Path("datasets/dag/train_data.csv")
 
+# Build the reward (likelihood × prior) and the environment separately.
 likelihood = LinearGaussianScore(data_path=str(data_path))
 prior = UniformDAGPrior(num_variables=num_variables)
 reward = DAGRewardModule(prior=prior, likelihood=likelihood)
-env = gfnx.DAGEnvironment(reward_module=reward, num_variables=num_variables)
-params = env.init(jax.random.PRNGKey(0))
 
-obs, state = env.reset(num_envs=1, env_params=params)
+env = gfnx.DAGEnvironment(num_variables=num_variables)
+env_params = env.init(jax.random.PRNGKey(0))
+reward_params = reward.init(jax.random.PRNGKey(0), env.reset())
+
+# `env.reset()` returns a single initial state — no batch dim, no env_params.
+state = env.reset()
 ```
 
-Set `num_envs > 1` to explore multiple graphs in parallel. For `num_variables < 6`
-the environment can enumerate every DAG.
+Use `jax.vmap` externally to explore multiple graphs in parallel. For
+`num_variables < 6` the environment can enumerate every DAG; the enumerable
+helpers (`get_true_distribution`, `get_normalizing_constant`, …) take both
+`reward_module` and `reward_params` explicitly.
+
+`DAGRewardModule` additionally exposes a `delta_score(state, action,
+next_state, env_params, reward_params)` method that exploits the modularity
+of the score (only the local term of the affected node changes when an edge
+is added). Modified Detailed Balance (`baselines/mdb_dag.py`) uses this for
+$O(d^2)$ per-step updates rather than re-evaluating the full score.
 
 ## API references:
 

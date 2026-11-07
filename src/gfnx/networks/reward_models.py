@@ -37,9 +37,9 @@ class EqxTransformerRewardModel(eqx.Module):
         key: chex.PRNGKey | None = None,
     ) -> Float[Array, " output_dim"]:
         pos_ids = jnp.arange(inputs.shape[0])
-        x = self.encoder(
-            inputs, pos_ids, enable_dropout=enable_dropout, key=key
-        )["layers_out"][-1]  # [seq_len, hidden_size]
+        x = self.encoder(inputs, pos_ids, enable_dropout=enable_dropout, key=key)["layers_out"][
+            -1
+        ]  # [seq_len, hidden_size]
         x = x.mean(axis=0)  # Average pooling
         # MLP layers for a final prediction
         return self.pooler(x)

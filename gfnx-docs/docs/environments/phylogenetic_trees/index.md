@@ -65,16 +65,19 @@ from gfnx.utils import get_phylo_initialization_args
 data_dir = Path("path/to/phylo_datasets")
 env_kwargs, reward_kwargs = get_phylo_initialization_args("DS1", data_dir)
 
-reward = gfnx.PhyloTreeRewardModule(**reward_kwargs)
-env = gfnx.PhyloTreeEnvironment(reward_module=reward, **env_kwargs)
-params = env.init(jax.random.PRNGKey(0))
+# Build the reward module and the environment separately.
+reward_module = gfnx.PhyloTreeRewardModule(**reward_kwargs)
+env = gfnx.PhyloTreeEnvironment(**env_kwargs)
+env_params = env.init(jax.random.PRNGKey(0))
+reward_params = reward_module.init(jax.random.PRNGKey(0), env.reset())
 
-obs, state = env.reset(num_envs=1, env_params=params)
+# `env.reset()` returns a single initial state.
+state = env.reset()
 ```
 
-Just like other GFNX environments, `PhyloTreeEnvironment` is fully vectorised:
-set `num_envs > 1` to roll out multiple forests in parallel. When a trajectory
-terminates the returned `log_reward` corresponds to the expression above.
+All environment methods operate on a single state — use `jax.vmap` to roll
+out multiple forests in parallel. The log-reward is computed post-rollout
+via `reward_module.log_reward(state, reward_params)`.
 
 
 ## API references:

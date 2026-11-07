@@ -2,7 +2,7 @@ import jax
 import matplotlib
 from matplotlib.animation import FuncAnimation
 
-from gfnx.base import BaseEnvParams, BaseEnvState, BaseVecEnvironment
+from gfnx.base import BaseEnvironment, BaseEnvParams, BaseEnvState, BaseRewardModule
 
 from ..utils import TrajectoryData, split_traj_to_transitions
 from .hypergrid import HypergridEnvironment, HypergridRenderer
@@ -39,7 +39,12 @@ class Visualizer:
     """
 
     def __init__(
-        self, env: BaseVecEnvironment, env_params: BaseEnvParams, dpi: float = 200.0
+        self,
+        env: BaseEnvironment,
+        env_params: BaseEnvParams,
+        dpi: float = 200.0,
+        reward_module: BaseRewardModule | None = None,
+        reward_params=None,
     ):
         """Initialize the Visualizer with the given environment and parameters.
 
@@ -49,6 +54,9 @@ class Visualizer:
             dpi: Dots per inches - image resolution multiplier. Controls the pixel
                  density of rendered images. Higher DPI = more pixels = sharper
                  images but slower rendering and larger files (default: 200.0)
+            reward_module: Optional reward module; the hypergrid backend uses it
+                 to shade cells by reward.
+            reward_params: Parameters for ``reward_module``.
 
         Raises:
             NotImplementedError: If the environment type is not supported
@@ -58,7 +66,9 @@ class Visualizer:
         if issubclass(type(env), SequenceEnvironment):
             self.backend = SequenceRenderer(env, env_params, dpi=dpi)
         elif issubclass(type(env), HypergridEnvironment):
-            self.backend = HypergridRenderer(env, env_params, dpi=dpi)
+            self.backend = HypergridRenderer(
+                env, env_params, dpi=dpi, reward_module=reward_module, reward_params=reward_params
+            )
         else:
             raise NotImplementedError("Unsupported environment type")
 
@@ -88,11 +98,8 @@ class Visualizer:
             The trajectory is expected to have shape [B, T, ...]
             where B is batch size and T is trajectory length.
         """
-        batch_size, traj_len = trajectory.action.shape
-        transitions = jax.tree.map(
-            lambda x: x.reshape((batch_size, traj_len - 1) + tuple(x.shape[1:])),
-            split_traj_to_transitions(trajectory),
-        )  # Reshape to [B x T x ...]
+        traj_len = trajectory.action.shape[1]
+        transitions = jax.vmap(split_traj_to_transitions)(trajectory)  # [B x T x ...]
 
         self.backend.init_state(
             jax.tree.map(lambda x: x[:, 0, ...], transitions.state)
@@ -131,11 +138,8 @@ class Visualizer:
             The trajectory is expected to have shape [B, T, ...] where B is
             batch size and T is trajectory length.
         """
-        batch_size, traj_len = trajectory.action.shape
-        transitions = jax.tree.map(
-            lambda x: x.reshape((batch_size, traj_len - 1) + tuple(x.shape[1:])),
-            split_traj_to_transitions(trajectory),
-        )  # Reshape to [B x T x ...]
+        traj_len = trajectory.action.shape[1]
+        transitions = jax.vmap(split_traj_to_transitions)(trajectory)  # [B x T x ...]
 
         self.backend.init_state(
             jax.tree.map(lambda x: x[:, 0, ...], transitions.state)
