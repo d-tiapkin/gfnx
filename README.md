@@ -19,6 +19,16 @@
 - Ready-to-run baseline agents inspired by the [CleanRL](https://github.com/vwxyzjn/cleanrl) style of concise single-file experiments.
 - Utilities for logging, checkpointing, and evaluation that make it easy to compare runs and extend the library with new research code.
 
+## Documentation
+
+The full documentation is hosted at **[gfnx.readthedocs.io](https://gfnx.readthedocs.io/en/latest/)**; its sources live in [`gfnx-docs/docs/`](gfnx-docs/docs/) and can be read directly on GitHub. First-time readers should go through:
+
+1. [Background](gfnx-docs/docs/background.md) — GFlowNets, forward/backward policies and the training objectives.
+2. [Walkthrough](gfnx-docs/docs/walkthrough.md) — a complete Detailed Balance baseline, line by line, including vmapping training over seeds.
+3. [API reference](gfnx-docs/docs/api/index.md) — generated from the docstrings of [environments](gfnx-docs/docs/environments/index.md), reward modules, rollout utilities and [metrics](gfnx-docs/docs/metrics/index.md).
+
+The [notebooks](notebooks/) open in Google Colab and need nothing but a browser; [baselines](gfnx-docs/docs/baselines.md) lists every ready-to-run training script. To build the docs site locally, see [Building the docs](gfnx-docs/docs/building_docs.md).
+
 ## Installation
 
 ### Requirements
@@ -26,33 +36,41 @@
 - Python 3.12, 3.13 or 3.14.
 - A working JAX installation. CPU works out of the box; for GPU/TPU accelerators follow the [official JAX installation guide](https://jax.readthedocs.io/en/latest/installation.html).
 
-### Install the latest release
+### Install the latest version
 
+```bash
+pip install git+https://github.com/d-tiapkin/gfnx.git
 ```
-pip install gfnx
+
+This installs the current `main` branch, which the documentation describes. The `gfnx` package on PyPI (`pip install gfnx`, version 0.0.1) predates the decoupled environment / reward API.
+
+For NVIDIA GPUs, add the CUDA 12 extra:
+
+```bash
+pip install "gfnx[cuda12] @ git+https://github.com/d-tiapkin/gfnx.git"
 ```
 
 Verify the install with:
 
-```
+```bash
 python -c "import gfnx; print('gfnx import OK')"
 ```
 
 ### Develop locally and run baselines
 
-```
+```bash
 git clone https://github.com/d-tiapkin/gfnx.git
 cd gfnx
-pip install -e .[baselines]
+pip install -e ".[baselines]"
 ```
 
-The editable install keeps your local changes in sync with the Python package, while the optional `baselines` extra pulls in the dependencies required by the reference training scripts. As in with `CleanRL` ideology, the baselines are not supposed to be imported, they serve only as a reference implementation.
+The quotes around `".[baselines]"` matter in `zsh` (the default macOS shell). The editable install keeps your local changes in sync with the Python package, while the optional `baselines` extra pulls in the dependencies required by the reference training scripts. In line with the CleanRL philosophy, the baselines are not meant to be imported: they serve as reference implementations. The TFBind-8, QM9, AMP and GFP rewards read data from `proxy/`, and the phylogenetic datasets are fetched with `bash download_ds.sh`, so run those from the repository root.
 
 ## Quickstart
 
 Kick off a short training run of Detailed Balance in the Hypergrid environment:
 
-```
+```bash
 python baselines/db_hypergrid.py num_train_steps=1_000 logging.tqdm_print_rate=100
 ```
 
@@ -77,7 +95,7 @@ The script is powered by Hydra, so you can override any configuration value on t
 
 ## Citation
 
-```
+```bibtex
 @article{tiapkin2025gfnx,
   title={gfnx: Fast and Scalable Library for Generative Flow Networks in JAX},
   author={Tiapkin, Daniil and Agarkov, Artem and Morozov, Nikita and Maksimov, Ian and Tsyganov, Askar and Gritsaev, Timofei and Samsonov, Sergey},

@@ -22,6 +22,26 @@ TPolicyParams = TypeVar("TPolicyParams")
 # Technical classes for storage of trajectory and transition data
 @chex.dataclass
 class TrajectoryData:
+    """Time-major record of a single rollout, as returned by `forward_rollout`.
+
+    Every field has a leading time axis of length `T + 1`, where
+    `T = env.max_steps_in_episode`; after `jax.vmap` over environments the shapes become
+    `[B, T + 1, ...]`. The last step is always padding.
+
+    Attributes:
+        obs: Observations of the visited states, `[T + 1, ...]`.
+        state: Visited environment states, `[T + 1, ...]`.
+        action: Action taken at each step (forward actions for `forward_rollout`, backward
+            actions for `backward_rollout`), `[T + 1]`.
+        done: `True` if the step's next state ends the trajectory (terminal for forward
+            rollouts, initial for backward rollouts); stays `True` on padding steps,
+            `[T + 1]`.
+        pad: `True` if the step is padding, i.e. its state had already ended the
+            trajectory, `[T + 1]`.
+        info: Per-step info: `entropy`, `sampled_log_prob` and whatever the policy
+            returns (e.g. `forward_logits`, `log_flow`), `[T + 1, ...]`.
+    """
+
     obs: TObs  # [T+1 x ...]
     state: TEnvState  # [T+1 x ...]
     action: TAction | TBackwardAction  # [T+1]
@@ -41,6 +61,21 @@ class TrajectoryData:
 
 @chex.dataclass
 class TransitionData:
+    """Consecutive `(s, a, s')` pairs of a single trajectory, from `split_traj_to_transitions`.
+
+    Every field has a leading axis of length `T`; after `jax.vmap` the shapes become
+    `[B, T, ...]`, usually flattened to `[B * T, ...]` for transition-level losses.
+
+    Attributes:
+        obs: Observations of the source states, `[T, ...]`.
+        state: Source states, `[T, ...]`.
+        action: Actions taken in the source states, `[T]`.
+        next_obs: Observations of the next states, `[T, ...]`.
+        next_state: Next states, `[T, ...]`.
+        done: `True` if the transition ends the trajectory, `[T]`.
+        pad: `True` for padding transitions, `[T]`.
+    """
+
     obs: TObs  # [T x ...]
     state: TEnvState  # [T x ...]
     action: TAction | TBackwardAction  # [T]
