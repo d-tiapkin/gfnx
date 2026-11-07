@@ -5,6 +5,14 @@ primitive to **single states** (no batch dimension). Batching is done with
 `jax.vmap` by the caller. Most of the changes below follow from these two
 decisions.
 
+## Requirements
+
+| 0.0.x | 0.1.0 |
+|-------|-------|
+| Python >= 3.10 | Python 3.12, 3.13 or 3.14 (`>=3.12,<3.15`) |
+| `numpy==1.26.4` | `numpy>=2.1` |
+| `jax`/`jaxlib >= 0.4.27` | `jax`/`jaxlib >=0.11.0,<0.13.0` (also for the `cuda12` extra) |
+
 ## At a glance
 
 ```python
@@ -82,6 +90,19 @@ The mask flip is the easiest change to miss: anything that did
 | `UpdateArgs(log_rewards=log_rewards)` | `UpdateArgs(rewards=jnp.exp(log_rewards))`: linear scale |
 | Reward-dependent metrics (ELBO, EUBO, correlation, top-k, approximate / exact distribution) got rewards through the environment | Pass `reward_module=` to the constructor and the current `reward_params=` in `ProcessArgs` at each evaluation |
 | — | New: `metrics_module.step(...)` combines `update` with eval-gated `process` + `get` |
+| — | New: FCS metrics (`OnPolicyFCSMetricsModule`, `TestFCSMetricsModule`) and `gfnx.utils.estimate_marginal_log_probs` |
+| `ExactDistributionMetricsModule` failed in `process` on enumerable environments missing `get_all_states` / `state_to_index` / `get_true_distribution` (TFBind8, QM9Small) | Raises `ValueError` at construction |
+
+## Behaviour changes
+
+These do not change any signature but can change results:
+
+- `PhyloTreeEnvironment.init` now passes `bits_per_seq_elem` into `EnvParams`.
+  In 0.0.x it was always the default 5, so models were sized wrong for any
+  other encoding (e.g. 4-bit DNA/RNA).
+- `gfnx.utils.dag.sample_from_linear_gaussian` (and so `generate_dataset`) returns data
+  columns in graph-node order, matching `adjacency.npy`, instead of
+  topological order. The random draws are the same; only the column order changes.
 
 ## Custom environments
 

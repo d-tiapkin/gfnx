@@ -78,7 +78,7 @@ The script is powered by Hydra, so you can override any configuration value on t
 
 ## Upgrading from 0.0.x
 
-Version 0.1.0 decouples rewards from environments and makes all environment primitives single-state (batch with `jax.vmap`). Old code will not run unchanged. See the [migration guide](gfnx-docs/docs/migration.md) for an old-call → new-call table.
+Version 0.1.0 decouples rewards from environments, makes all environment primitives single-state (batch with `jax.vmap`), and requires Python 3.12+ with numpy 2. Old code will not run unchanged. See the [migration guide](gfnx-docs/docs/migration.md) for an old-call → new-call table.
 
 ## Support
 

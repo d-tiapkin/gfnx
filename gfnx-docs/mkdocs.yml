@@ -110,4 +110,5 @@ nav:
       - Environments: api/environments.md
       - Reward modules: api/rewards.md
       - Metrics: metrics/api.md
+  - Migrating from 0.0.x: migration.md
   - Building the docs: building_docs.md
