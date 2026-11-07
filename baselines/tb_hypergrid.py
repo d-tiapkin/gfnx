@@ -23,6 +23,7 @@ import numpy as np
 import optax
 from omegaconf import OmegaConf
 from utils.checkpoint import save_checkpoint
+from utils.config import FrozenConfig, freeze_config
 from utils.logger import Writer
 
 import gfnx
@@ -33,6 +34,7 @@ from gfnx.metrics import (
     ExactDistributionMetricsModule,
     MultiMetricsModule,
     MultiMetricsState,
+    OnPolicyFCSMetricsModule,
 )
 
 log = logging.getLogger(__name__)
@@ -107,7 +109,7 @@ class MLPPolicy(eqx.Module):
 # Define the train state that will be used in the training loop
 class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
-    config: OmegaConf
+    config: FrozenConfig
     env: gfnx.HypergridEnvironment
     env_params: gfnx.HypergridEnvParams
     reward_module: gfnx.GeneralHypergridRewardModule
@@ -286,6 +288,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
                     reward_params=train_state.reward_params,
                 ),
                 "eubo": EUBOMetricsModule.ProcessArgs(
+                    policy_params=policy_params,
+                    env_params=train_state.env_params,
+                    reward_params=train_state.reward_params,
+                ),
+                "fcs": OnPolicyFCSMetricsModule.ProcessArgs(
                     policy_params=policy_params,
                     env_params=train_state.env_params,
                     reward_params=train_state.reward_params,
@@ -470,6 +477,16 @@ def run_experiment(cfg: OmegaConf) -> None:
             batch_size=cfg.num_envs,
             rng_key=eval_init_key,
         ),
+        "fcs": OnPolicyFCSMetricsModule(
+            env=env,
+            reward_module=reward_module,
+            fwd_policy_fn=fwd_policy_fn,
+            bwd_policy_fn=bwd_policy_fn,
+            subset_size=cfg.metrics.fcs.subset_size,
+            n_subsets=cfg.metrics.fcs.n_subsets,
+            n_rounds=cfg.metrics.fcs.n_rounds,
+            batch_size=cfg.metrics.fcs.batch_size,
+        ),
     })
     # Initialize the metrics state
     eval_init_key, _new_eval_init_key = jax.random.split(eval_init_key)
@@ -492,7 +509,7 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     train_state = TrainState(
         rng_key=rng_key,
-        config=cfg,
+        config=freeze_config(cfg),
         env=env,
         env_params=env_params,
         reward_module=reward_module,

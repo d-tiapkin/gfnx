@@ -183,18 +183,27 @@ def sample_linear_gaussian(graph, loc_edges=0.0, scale_edges=1.0, obs_scale=None
 
 
 def sample_from_linear_gaussian(graph, num_samples, rng=None):
-    """Sample from a linear-Gaussian model using ancestral sampling."""
+    """Sample from a linear-Gaussian model using ancestral sampling.
+
+    Nodes are sampled in topological order, but column ``i`` of the returned samples
+    always holds node ``list(graph.nodes)[i]``. This is the row/column order of
+    ``nx.to_numpy_array(graph)``, so the data lines up with the graph's adjacency matrix.
+
+    Returns:
+        ``(nodes, samples)``: the node names in column order, and an array of shape
+        ``[num_samples, num_nodes]``.
+    """
     if rng is None:
         rng = np.random.default_rng()
 
     if graph.graph.get("type", "") != "linear-gaussian":
         raise ValueError("The graph is not a Linear Gaussian Bayesian Network.")
 
-    nodes = list(nx.topological_sort(graph))
+    nodes = list(graph.nodes)
     node_index = {node: idx for idx, node in enumerate(nodes)}
     samples = np.zeros((num_samples, len(nodes)))
 
-    for node in nodes:
+    for node in nx.topological_sort(graph):
         idx = node_index[node]
         attrs = graph.nodes[node]
         if attrs["parents"]:
@@ -217,6 +226,15 @@ def generate_dataset(
     obs_scale: float | None = None,
     folder: Path | None = None,
 ):
+    """Samples a random linear-Gaussian Bayesian network and a training set from it.
+
+    If ``folder`` is given, the graph, ``adjacency.npy``, ``train_data.csv`` and metadata
+    are saved under ``folder / "train_data"``.
+
+    Returns:
+        Array of shape ``[num_train_samples, num_variables]``. Column ``i`` is variable ``i``
+        of the DAG environment and row/column ``i`` of ``adjacency.npy``.
+    """
     data_rng = np.random.default_rng(seed=data_seed)
     if obs_scale is None:
         obs_scale = math.sqrt(0.1)

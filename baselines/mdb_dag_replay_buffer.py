@@ -24,6 +24,7 @@ import jraph
 import optax
 from omegaconf import OmegaConf
 from utils.checkpoint import save_checkpoint
+from utils.config import FrozenConfig, freeze_config
 from utils.logger import Writer
 
 import gfnx
@@ -31,6 +32,7 @@ from gfnx.metrics import (
     ExactDistributionMetricsModule,
     MultiMetricsModule,
     MultiMetricsState,
+    OnPolicyFCSMetricsModule,
     TestCorrelationMetricsModule,
 )
 from gfnx.utils import ReplayBuffer, ReplayBufferState, make_replay_buffer
@@ -285,7 +287,7 @@ class GNNPolicy(eqx.Module):
 # Define the train state that will be used in the training loop
 class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
-    config: OmegaConf
+    config: FrozenConfig
     env: gfnx.DAGEnvironment
     env_params: gfnx.DAGEnvParams
     reward_module: gfnx.DAGRewardModule
@@ -506,6 +508,11 @@ def eval_step(
                     reward_params=train_state.reward_params,
                 ),
                 "markov_blanket_corr": TestCorrelationMetricsModule.ProcessArgs(
+                    policy_params=model_params,
+                    env_params=train_state.env_params,
+                    reward_params=train_state.reward_params,
+                ),
+                "fcs": OnPolicyFCSMetricsModule.ProcessArgs(
                     policy_params=model_params,
                     env_params=train_state.env_params,
                     reward_params=train_state.reward_params,
@@ -739,6 +746,16 @@ def run_experiment(cfg: OmegaConf) -> None:
             batch_size=cfg.metrics.batch_size,
             transform_fn=markov_blanket_transform_fn,
         ),
+        "fcs": OnPolicyFCSMetricsModule(
+            env=env,
+            reward_module=reward_module,
+            fwd_policy_fn=fwd_policy_fn,
+            bwd_policy_fn=bwd_policy_fn,
+            subset_size=cfg.metrics.fcs.subset_size,
+            n_subsets=cfg.metrics.fcs.n_subsets,
+            n_rounds=cfg.metrics.fcs.n_rounds,
+            batch_size=cfg.metrics.fcs.batch_size,
+        ),
     })
 
     # Construct the test set
@@ -790,7 +807,7 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     train_state = TrainState(
         rng_key=rng_key,
-        config=cfg,
+        config=freeze_config(cfg),
         env=env,
         env_params=env_params,
         reward_module=reward_module,

@@ -23,6 +23,7 @@ import jax.numpy as jnp
 import optax
 from omegaconf import OmegaConf
 from utils.checkpoint import save_checkpoint
+from utils.config import FrozenConfig, freeze_config
 from utils.logger import Writer
 
 import gfnx
@@ -117,7 +118,7 @@ class EBM(eqx.Module):
 
 class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
-    config: OmegaConf
+    config: FrozenConfig
     env: gfnx.IsingEnvironment
     env_params: gfnx.IsingEnvParams
     reward_module: gfnx.IsingRewardModule
@@ -494,7 +495,7 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     train_state = TrainState(
         rng_key=rng_key,
-        config=cfg,
+        config=freeze_config(cfg),
         env=env,
         env_params=env_params,
         reward_module=reward_module,

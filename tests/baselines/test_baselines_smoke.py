@@ -27,6 +27,14 @@ _COMMON = [
     "writer.save_locally=false",
 ]
 
+# Small FCS settings for the baselines that report the FCS metric.
+_FCS_SMALL = [
+    "metrics.fcs.subset_size=4",
+    "metrics.fcs.n_subsets=2",
+    "metrics.fcs.n_rounds=1",
+    "metrics.fcs.batch_size=8",
+]
+
 # Overrides applied to every multiseed baseline.
 _COMMON_MULTISEED = [
     "num_train_steps=2",
@@ -35,24 +43,24 @@ _COMMON_MULTISEED = [
 
 # (script_name, extra_overrides) for standard baselines
 STANDARD_BASELINES = [
-    ("tb_hypergrid", []),
+    ("tb_hypergrid", _FCS_SMALL),
     ("db_hypergrid", []),
     ("subtb_hypergrid", []),
     ("soft_dqn_hypergrid", []),
-    ("db_bitseq", ["metrics.batch_size=128", "metrics.n_rounds=1"]),
-    ("tb_bitseq", ["metrics.batch_size=128", "metrics.n_rounds=1"]),
-    ("subtb_bitseq", ["metrics.batch_size=128", "metrics.n_rounds=1"]),
-    ("db_amp", ["metrics.num_traj=32"]),
-    ("tb_amp", ["metrics.num_traj=32"]),
-    ("db_tfbind", []),
-    ("tb_tfbind", []),
-    ("subtb_tfbind", []),
-    ("db_qm9_small", []),
-    ("tb_qm9_small", []),
+    ("db_bitseq", [*_FCS_SMALL, "metrics.batch_size=128", "metrics.n_rounds=1"]),
+    ("tb_bitseq", [*_FCS_SMALL, "metrics.batch_size=128", "metrics.n_rounds=1"]),
+    ("subtb_bitseq", [*_FCS_SMALL, "metrics.batch_size=128", "metrics.n_rounds=1"]),
+    ("db_amp", [*_FCS_SMALL, "metrics.num_traj=32"]),
+    ("tb_amp", [*_FCS_SMALL, "metrics.num_traj=32"]),
+    ("db_tfbind", _FCS_SMALL),
+    ("tb_tfbind", _FCS_SMALL),
+    ("subtb_tfbind", _FCS_SMALL),
+    ("db_qm9_small", _FCS_SMALL),
+    ("tb_qm9_small", _FCS_SMALL),
     ("tb_ising", ["data.num_samples=50"]),
     (
         "mdb_dag",
-        ["metrics.batch_size=200", "metrics.n_rounds=1"],
+        ["metrics.batch_size=200", "metrics.n_rounds=1", *_FCS_SMALL],
     ),
     (
         "mdb_dag_replay_buffer",
@@ -61,6 +69,7 @@ STANDARD_BASELINES = [
             "replay_buffer.sample_batch_size=2",
             "metrics.batch_size=200",
             "metrics.n_rounds=1",
+            *_FCS_SMALL,
         ],
     ),
 ]
@@ -151,6 +160,7 @@ def test_fldb_phylo_smoke(phylo_data_dir, tmp_path):
             "metrics.n_rounds=1",
             "metrics.n_terminal_states=2",
             "metrics.batch_size=2",
+            *_FCS_SMALL,
         ],
         cwd=REPO_ROOT,
         timeout=600,

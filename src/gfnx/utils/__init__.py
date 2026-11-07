@@ -9,6 +9,7 @@ from .exploration import (
 from .ising import get_true_ising_J
 from .ising_hbpt_sample import pt_sampler
 from .ising_wolf_sample import wolff_sampler
+from .marginal import estimate_marginal_log_probs
 from .masking import compute_action_log_probs, masked_mean, masked_sum
 from .molecules import (
     QM9_SMALL_BLOCKS,
@@ -55,6 +56,7 @@ __all__ = [
     "compute_action_log_probs",
     "corr",
     "create_exploration_schedule",
+    "estimate_marginal_log_probs",
     "forward_rollout",
     "forward_trajectory_log_probs",
     "get_phylo_initialization_args",

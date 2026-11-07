@@ -23,10 +23,16 @@ import optax
 from jaxtyping import Array, Int
 from omegaconf import OmegaConf
 from utils.checkpoint import save_checkpoint
+from utils.config import FrozenConfig, freeze_config
 from utils.logger import Writer
 
 import gfnx
-from gfnx.metrics import MultiMetricsModule, MultiMetricsState, TopKMetricsModule
+from gfnx.metrics import (
+    MultiMetricsModule,
+    MultiMetricsState,
+    OnPolicyFCSMetricsModule,
+    TopKMetricsModule,
+)
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -103,7 +109,7 @@ class TransformerPolicy(eqx.Module):
 # Define the train state that will be used in the training loop
 class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
-    config: OmegaConf
+    config: FrozenConfig
     env: gfnx.AMPEnvironment
     env_params: gfnx.AMPEnvParams
     reward_module: gfnx.EqxProxyAMPRewardModule
@@ -312,7 +318,12 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
                     policy_params=current_policy_params,
                     reward_params=train_state.reward_params,
                     env_params=env_params,
-                )
+                ),
+                "fcs": OnPolicyFCSMetricsModule.ProcessArgs(
+                    policy_params=current_policy_params,
+                    env_params=train_state.env_params,
+                    reward_params=train_state.reward_params,
+                ),
             }
         ),
         eval_each=train_state.config.logging.eval_each,
@@ -448,6 +459,15 @@ def run_experiment(cfg: OmegaConf) -> None:
             lhs_state.tokens, rhs_state.tokens, eos_id=env.eos_token, pad_id=env.pad_token
         )
 
+    # Backward policy used by the FCS metric to estimate p_T
+    def bwd_policy_fn_for_metrics(
+        rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
+    ) -> tuple[chex.Array, dict]:
+        del rng_key
+        policy = eqx.combine(policy_params, policy_static_for_metrics)
+        policy_outputs = policy(env_obs)
+        return policy_outputs["backward_logits"], policy_outputs
+
     metrics_module = MultiMetricsModule({
         "topk": TopKMetricsModule(
             env=env,
@@ -457,7 +477,17 @@ def run_experiment(cfg: OmegaConf) -> None:
             batch_size=cfg.metrics.batch_size,  # Ignored for a moment
             top_k=[10, 50, 100],
             distance_fn=amp_distance_fn,
-        )
+        ),
+        "fcs": OnPolicyFCSMetricsModule(
+            env=env,
+            reward_module=reward_module,
+            fwd_policy_fn=fwd_policy_fn_for_metrics,
+            bwd_policy_fn=bwd_policy_fn_for_metrics,
+            subset_size=cfg.metrics.fcs.subset_size,
+            n_subsets=cfg.metrics.fcs.n_subsets,
+            n_rounds=cfg.metrics.fcs.n_rounds,
+            batch_size=cfg.metrics.fcs.batch_size,
+        ),
     })
     metrics_state = metrics_module.init(
         eval_init_key,
@@ -467,7 +497,7 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     train_state = TrainState(
         rng_key=rng_key,
-        config=cfg,
+        config=freeze_config(cfg),
         env=env,
         env_params=env_params,
         reward_module=reward_module,

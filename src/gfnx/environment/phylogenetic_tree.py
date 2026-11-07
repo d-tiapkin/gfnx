@@ -1,3 +1,10 @@
+"""Phylogenetic tree environment: build a rooted binary tree by merging species.
+
+Follows the PhyloGFN formulation (Zhou et al., 2024). The parsimony reward lives in
+[`gfnx.reward.phylogenetic_tree`][gfnx.reward.phylogenetic_tree]; datasets DS1–DS8 are
+loaded with `gfnx.utils.get_phylo_initialization_args`.
+"""
+
 from typing import Any
 
 import chex
@@ -16,6 +23,28 @@ from ..base import (
 
 @chex.dataclass(frozen=True)
 class EnvState(BaseEnvState):
+    """State of a single phylogenetic-tree environment (a forest).
+
+    Nodes are numbered `0 .. 2n - 2`: leaves (species) are `0 .. n - 1`, and internal
+    nodes are appended in creation order. Each tree of the forest occupies a *slot*
+    `0 .. n - 1`, identified by the smallest leaf it contains.
+
+    Attributes:
+        sequences: Fitch state sets of every node, shape `[2n - 1, L]`. Each site is a
+            bitmask over `bits_per_seq_elem` characters; unconstructed nodes are zero.
+        left_child: Left child of every node, `-1` for leaves / unconstructed nodes.
+        right_child: Right child of every node, `-1` for leaves / unconstructed nodes.
+        parent: Parent of every node, `-1` for roots / unconstructed nodes.
+        to_root: Root node of the tree in each slot, shape `[n]`; `-1` if the slot was
+            merged into a smaller one.
+        to_leaf: Slot of the subtree rooted at each node, shape `[2n - 1]` (the smallest
+            leaf below it); `-1` for unconstructed nodes.
+        length: Number of constructed nodes, `n + number_of_merges`.
+        is_terminal: `True` once a single tree remains.
+        is_initial: `True` for the forest of `n` singleton trees.
+        is_pad: `True` for padding steps after termination.
+    """
+
     sequences: chex.Array  # [2 * num_nodes - 1, sequence_length]
     left_child: chex.Array  # [2 * num_nodes - 1]
     right_child: chex.Array  # [2 * num_nodes - 1]
@@ -32,12 +61,58 @@ class EnvState(BaseEnvState):
 
 @chex.dataclass(frozen=True)
 class EnvParams(BaseEnvParams):
+    """Phylogenetic-tree dynamics parameters.
+
+    Attributes:
+        num_nodes: Number of species $n$ (leaves).
+        sequence_length: Number of aligned sites $L$.
+        bits_per_seq_elem: Bits used to encode one site (5 for DNA with gaps).
+    """
+
     num_nodes: int
     sequence_length: int
     bits_per_seq_elem: int = 5
 
 
 class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
+    r"""Bottom-up construction of rooted binary phylogenetic trees over $n$ species.
+
+    The initial state is a forest of $n$ singleton trees, one per species. Each step
+    picks two trees of the forest and joins them under a new common ancestor; after
+    exactly $n - 1$ merges a single rooted binary tree spans all species and the episode
+    terminates. Ancestral sequences are summarised by Fitch state sets: per site, the
+    parent's set is the intersection of its children's sets if it is non-empty and their
+    union otherwise (each union is one mutation for the parsimony score).
+
+    Each tree of the forest occupies a *slot* `0 .. n - 1`, named after the smallest
+    species it contains: initially slot `i` holds species `i`, and merging the trees of
+    slots $i < j$ leaves the result in slot $i$ and empties slot $j$.
+
+    * **State** — the forest; see [`EnvState`][gfnx.environment.phylogenetic_tree.EnvState].
+    * **Forward actions** — `n * (n - 1) / 2` actions, one per unordered pair of slots
+      $(i, j)$, $i < j$, in `jnp.triu_indices(n, k=1)` order. The action merges the trees
+      in slots $i$ and $j$ into slot $i$; it is valid iff both slots hold a tree.
+    * **Backward actions** — `n - 1` actions. Action `b` splits the tree in slot `b` at
+      its root; it is valid iff that root is an internal node. Node ids are kept
+      contiguous by swapping the removed node with the most recently created one.
+    * **Observation** — multi-hot encoding (one bit per character) of the Fitch set of
+      each slot's root, `uint8` of shape `[n, L, bits_per_seq_elem]` (zeros for empty
+      slots), designed for transformer policies.
+    * **Episode length** — exactly `n - 1` steps.
+
+    Args:
+        sequences: Binary-encoded aligned sequences of shape `[n, L]` (`n > 1`), where
+            each entry is a bitmask over `bits_per_seq_elem` characters. Use
+            `gfnx.utils.get_phylo_initialization_args` to load DS1–DS8.
+        sequence_type: Alphabet name, e.g. `"DNA_WITH_GAP"`.
+        bits_per_seq_elem: Bits per site in the encoding (5 for DNA with gaps).
+
+    References:
+        Zhou, M. Y., Yan, Z., Layne, E., Malkin, N., Zhang, D., Jain, M., Blanchette, M.,
+        Bengio, Y. (2024). PhyloGFN: Phylogenetic inference with generative flow
+        networks. ICLR.
+    """
+
     def __init__(
         self,
         sequences: chex.Array,  # [num_nodes, sequence_length]
@@ -58,10 +133,11 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
 
     @property
     def name(self) -> str:
+        """Environment name."""
         return "PhyloTree-v0"
 
     def reset(self) -> EnvState:
-        """Returns a single initial state."""
+        """Returns the forest of `n` singleton trees (one per species)."""
         sequences = jnp.concatenate(
             [
                 self.sequences,
@@ -86,14 +162,21 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
         )
 
     def init(self, rng_key: chex.PRNGKey) -> EnvParams:
+        """Returns `EnvParams(num_nodes, sequence_length, bits_per_seq_elem)`; deterministic."""
         return EnvParams(
             num_nodes=self.num_nodes,
             sequence_length=self.sequence_length,
+            bits_per_seq_elem=self.bits_per_seq_elem,
         )
 
     def step(
         self, state: EnvState, action: TAction, env_params: EnvParams
     ) -> tuple[chex.Array, EnvState, TDone, dict[str, Any]]:
+        """Merges the trees in slots `(i, j) = triu_indices(n, 1)[:, action]` into slot `i`.
+
+        Returns:
+            `(obs, next_state, done, info)`; `done` is `True` once one tree remains.
+        """
         left = state.to_root[self.lefts[action]]
         right = state.to_root[self.rights[action]]
         overlap = jnp.bitwise_and(state.sequences[left], state.sequences[right])
@@ -132,6 +215,14 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
     def backward_step(
         self, state: EnvState, backward_action: TAction, env_params: EnvParams
     ) -> tuple[chex.Array, EnvState, TDone, dict[str, Any]]:
+        """Splits the tree in slot `backward_action` at its root.
+
+        The two subtrees return to their own slots, and the removed root is swapped with
+        the most recently created node so that node ids stay contiguous.
+
+        Returns:
+            `(obs, prev_state, done, info)`; `done` is `True` once only singletons remain.
+        """
         root = state.to_root[backward_action]
         left_child = state.left_child[root]
         right_child = state.right_child[root]
@@ -250,7 +341,7 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
         )
 
     def get_obs(self, state: EnvState, env_params: EnvParams) -> chex.ArrayTree:
-        """Returns observation for a single state."""
+        """Returns multi-hot Fitch sets of each slot's root, shape `[n, L, bits]`."""
         sequences = jnp.where(
             (state.to_root != -1)[:, jnp.newaxis],
             state.sequences[state.to_root],
@@ -271,6 +362,7 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
         _next_state: EnvState,
         _env_params: EnvParams,
     ) -> TAction:
+        """Returns slot `i` of the merged pair: the slot that now holds the new tree."""
         return self.lefts[forward_action]
 
     def get_forward_action(
@@ -280,6 +372,7 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
         _prev_state: EnvState,
         _env_params: EnvParams,
     ) -> TAction:
+        """Returns the pair index of the two slots that the split separates."""
         left = state.to_leaf[state.left_child[state.to_root[backward_action]]]
         right = state.to_leaf[state.right_child[state.to_root[backward_action]]]
         return left * (2 * self.num_nodes - 1 - left) // 2 + right - (left + 1)
@@ -300,19 +393,23 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
 
     @property
     def max_steps_in_episode(self) -> int:
+        """Exactly `n - 1` merges."""
         return self.num_nodes - 1
 
     @property
     def action_space(self) -> spaces.Discrete:
+        """`Discrete(n * (n - 1) / 2)`: unordered slot pairs."""
         num_actions = self.num_nodes * (self.num_nodes - 1) // 2
         return spaces.Discrete(num_actions)
 
     @property
     def backward_action_space(self) -> spaces.Discrete:
+        """`Discrete(n - 1)`: the slot to split (slot `n - 1` can never hold a merge)."""
         return spaces.Discrete(self.num_nodes - 1)
 
     @property
     def observation_space(self) -> spaces.Box:
+        """`uint8` box of shape `[n, L, bits_per_seq_elem]`."""
         return spaces.Box(
             low=0,
             high=1,
@@ -322,6 +419,7 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
 
     @property
     def state_space(self) -> spaces.Dict:
+        """State space of the environment."""
         return spaces.Dict({
             "sequences": spaces.Box(
                 low=0,

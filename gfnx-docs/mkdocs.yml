@@ -1,12 +1,113 @@
 site_name: gfnx Documentation
+site_description: Fast and scalable Generative Flow Networks in JAX
+site_url: https://gfnx.readthedocs.io/en/latest/
+repo_url: https://github.com/d-tiapkin/gfnx
+repo_name: d-tiapkin/gfnx
+edit_uri: edit/main/gfnx-docs/docs/
+
+# Rebuild on docstring changes too when running `mkdocs serve`.
+watch:
+  - ../src
+
 theme:
   name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.footer
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+
 plugins:
   - search
-  - mkdocstrings
+  - mkdocstrings:
+      handlers:
+        python:
+          # Resolve `gfnx` from the source tree so the docs build without installing it.
+          paths: [../src]
+          options:
+            docstring_style: google
+            docstring_options:
+              warn_missing_types: false
+            docstring_section_style: table
+            merge_init_into_class: true
+            members_order: source
+            filters: ["!^_"]
+            show_source: false
+            show_signature_annotations: true
+            separate_signature: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+
 markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences
   - pymdownx.arithmatex:
       generic: true
+  - toc:
+      permalink: true
+
 extra_javascript:
-  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - javascripts/mathjax.js
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - 1. Background: background.md
+      - 2. Walkthrough: walkthrough.md
+      - 3. Notebooks: notebooks.md
+  - Environments:
+      - environments/index.md
+      - Hypergrid:
+          - environments/hypergrid/index.md
+          - Environment API: environments/hypergrid/environment_api.md
+          - Reward API: environments/hypergrid/reward_api.md
+      - Sequences:
+          - environments/sequences/index.md
+          - Environment API: environments/sequences/environment_api.md
+          - Reward API: environments/sequences/reward_api.md
+      - Bayesian networks:
+          - environments/bayesian_networks/index.md
+          - Environment API: environments/bayesian_networks/environment_api.md
+          - Reward API: environments/bayesian_networks/reward_api.md
+      - Ising model:
+          - environments/ising_model/index.md
+          - Environment API: environments/ising_model/environment_api.md
+          - Reward API: environments/ising_model/reward_api.md
+      - Phylogenetic trees:
+          - environments/phylogenetic_trees/index.md
+          - Environment API: environments/phylogenetic_trees/environment_api.md
+          - Reward API: environments/phylogenetic_trees/reward_api.md
+  - Metrics:
+      - metrics/index.md
+      - Lifecycle & multimetrics: metrics/base.md
+      - Distribution-based:
+          - metrics/distribution_based/index.md
+          - Exact: metrics/distribution_based/exact.md
+          - Approximate: metrics/distribution_based/approximate.md
+      - Correlation:
+          - metrics/correlation/index.md
+          - Test set: metrics/correlation/test_set.md
+          - On-policy: metrics/correlation/on_policy.md
+      - ELBO: metrics/elbo.md
+      - EUBO: metrics/eubo.md
+      - Flow consistency in sub-graphs (FCS): metrics/fcs.md
+      - Mean reward & reward delta: metrics/reward_delta.md
+      - Mode coverage: metrics/modes.md
+      - Top-K: metrics/top_k.md
+      - Metrics API: metrics/api.md
+  - Baselines: baselines.md
+  - API reference:
+      - api/index.md
+      - Core abstractions: api/core.md
+      - Rollouts & training utilities: api/utils.md
+      - Environments: api/environments.md
+      - Reward modules: api/rewards.md
+      - Metrics: metrics/api.md
+  - Building the docs: building_docs.md

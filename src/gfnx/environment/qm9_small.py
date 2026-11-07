@@ -1,3 +1,8 @@
+"""QM9 (small) environment: molecules assembled from 2-stem building blocks.
+
+The lookup-table reward lives in [`gfnx.reward.qm9_small`][gfnx.reward.qm9_small].
+"""
+
 from math import prod
 
 import chex
@@ -14,6 +19,32 @@ from .sequence import (
 
 
 class QM9SmallEnvironment(FixedPrependAppendSequenceEnvironment):
+    """Small-molecule generation from 11 two-stem building blocks, 5 blocks per molecule.
+
+    Every block has exactly two attachment points (stems), so a molecule is a linear
+    chain of blocks and the task reduces to a prepend/append sequence MDP. This is a
+    [`FixedPrependAppendSequenceEnvironment`][gfnx.environment.sequence.FixedPrependAppendSequenceEnvironment]
+    with `max_length = 5` and `nchar = 11`:
+
+    * **State** — `tokens` of shape `[5]` over `gfnx.utils.QM9_SMALL_FULL_ALPHABET`
+      (blocks `0..10`, then `[BOS]`, `[EOS]`, `[PAD]`).
+    * **Forward actions** — 22 actions: prepend block `c` (`c < 11`) or append block `c`
+      (`11 + c`).
+    * **Backward actions** — 2 actions: remove the first block (`0`) or the last (`1`).
+    * **Observation** — `[bos_token, *tokens]`, shape `[6]`.
+    * **Episode length** — exactly 5 steps.
+
+    The reward is a proxy prediction of the HOMO-LUMO gap. The environment is enumerable
+    over its $11^5 = 161{,}051$ terminal states (exact target distribution, normalising
+    constant and expected reward; arrays of shape `(11,) * 5`).
+
+    The environment has no constructor arguments.
+
+    References:
+        Shen, M. W., et al. (2023). Towards understanding and improving GFlowNet
+        training. ICML.
+    """
+
     def __init__(self) -> None:
         self.char_to_id = {char: i for i, char in enumerate(QM9_SMALL_FULL_ALPHABET)}
 
@@ -39,9 +70,7 @@ class QM9SmallEnvironment(FixedPrependAppendSequenceEnvironment):
     def _get_states_rewards(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> chex.Array:
-        """
-        Returns the true distribution of rewards for all states.
-        """
+        """Evaluates the reward on every molecule; returns an array of shape `(11,) * 5`."""
         rewards = jnp.zeros((self.nchar,) * self.max_length, dtype=jnp.float32)
 
         def update_rewards(idx: int, rewards: chex.Array):
@@ -60,16 +89,12 @@ class QM9SmallEnvironment(FixedPrependAppendSequenceEnvironment):
     def get_true_distribution(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> chex.Array:
-        """
-        Returns the true distribution of rewards for all states.
-        """
+        """Returns $R(x)/Z$ for every molecule, as an array of shape `(11,) * 5`."""
         rewards = self._get_states_rewards(env_params, reward_module, reward_params)
         return rewards / rewards.sum()
 
     def get_empirical_distribution(self, states: EnvState, env_params: EnvParams) -> chex.Array:
-        """
-        Extracts the empirical distribution from the given states.
-        """
+        """Histogram of a batch of terminal states, as an array of shape `(11,) * 5`."""
         dist_shape = (self.nchar,) * self.max_length
         sample_idx = jax.vmap(lambda x: jnp.ravel_multi_index(x, dims=dist_shape, mode="clip"))(
             states.tokens
@@ -89,7 +114,7 @@ class QM9SmallEnvironment(FixedPrependAppendSequenceEnvironment):
     def get_expected_reward(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> float:
-        """Returns the expected reward under the reward-proportional distribution."""
+        r"""Returns $\mathbb{E}_{x \sim R/Z}[R(x)] = \sum_x R(x)^2 / \sum_x R(x)$."""
         rewards = self._get_states_rewards(env_params, reward_module, reward_params)
         return jnp.pow(rewards, 2).sum() / rewards.sum()
 
@@ -101,8 +126,6 @@ class QM9SmallEnvironment(FixedPrependAppendSequenceEnvironment):
     def get_normalizing_constant(
         self, env_params: EnvParams, reward_module: BaseRewardModule, reward_params: TRewardParams
     ) -> float:
-        """
-        Returns the normalizing constant.
-        """
+        r"""Returns $Z = \sum_x R(x)$ over all $11^5$ molecules."""
         rewards = self._get_states_rewards(env_params, reward_module, reward_params)
         return rewards.sum()

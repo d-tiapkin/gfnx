@@ -1,3 +1,11 @@
+"""Ising model environment: assign the spins of a lattice one at a time.
+
+Implements the sequential construction of Ising configurations used by EB-GFN
+(Zhang et al., 2022). The energy-based reward lives in
+[`gfnx.reward.ising`][gfnx.reward.ising]; its coupling matrix can be trained jointly with
+the GFlowNet (see `baselines/tb_ising.py`).
+"""
+
 from typing import Any
 
 import chex
@@ -17,6 +25,17 @@ from ..base import (
 
 @chex.dataclass(frozen=True)
 class EnvState(BaseEnvState):
+    """State of a single Ising environment.
+
+    Attributes:
+        state: Partial spin assignment of shape `[dim]` with entries in `{-1, 0, 1}`:
+            `-1` is an unassigned site, `0` is spin $-1$ and `1` is spin $+1$.
+        time: Number of spins assigned so far.
+        is_terminal: `True` once every site is assigned.
+        is_initial: `True` for the empty configuration.
+        is_pad: `True` for padding steps after termination.
+    """
+
     state: Int[Array, " dim"]
     time: Int[Array, ""]
     is_terminal: Bool[Array, ""]
@@ -26,26 +45,48 @@ class EnvState(BaseEnvState):
 
 @chex.dataclass(frozen=True)
 class EnvParams(BaseEnvParams):
+    r"""Ising dynamics parameters.
+
+    Attributes:
+        dim: Number of lattice sites $D$ (e.g. `N * N` for an $N \times N$ lattice).
+    """
+
     dim: int = 10
 
 
 class IsingEnvironment(BaseEnvironment[EnvState, EnvParams]):
-    """Ising environment for discrete energy-based models.
+    r"""Ising environment: sequential spin assignment on $D$ lattice sites.
 
-    This environment is based on the paper https://arxiv.org/pdf/2202.01361.pdf.
+    An object is a full spin configuration $\mathbf{x} \in \{-1, +1\}^D$. It is built from
+    the empty lattice by assigning one unassigned site per step, in any order, so every
+    trajectory has exactly $D$ steps:
+    $s_0 = (\varnothing, \ldots, \varnothing) \to s_1 \to \cdots \to s_D = \mathbf{x}$.
 
-    The states are represented as 1d tensors of length `ndim` with values in
-    `{-1, 0, 1}`. `s0` is empty (represented as -1), so `s0=[-1, -1, ..., -1]`.
-    An action corresponds to replacing a -1 with a 0 or a 1.
-    Action `i` in `[0, ndim - 1]` corresponds to replacing `s[i]` with 0.
-    Action `i` in `[ndim, 2 * ndim - 1]` corresponds to replacing `s[i - ndim]` with 1.
-    NOTE: There is no exit action; the environment terminates when all spins are set.
+    * **State** — `state` of shape `[dim]` with entries in `{-1, 0, 1}`: `-1` encodes an
+      unassigned site $\varnothing$, `0` encodes spin $-1$ and `1` encodes spin $+1$
+      (the canonical spin is `2 * state - 1`). $s_0$ is all `-1`.
+    * **Forward actions** — `2 * dim` actions. Action `i < dim` sets site `i` to `0`
+      (spin $-1$); action `dim + i` sets site `i` to `1` (spin $+1$). Only unassigned
+      sites can be set. There is no stop action: the episode terminates automatically
+      when all sites are assigned.
+    * **Backward actions** — `dim` actions. Action `i` clears site `i` back to `-1`
+      (valid iff it is assigned).
+    * **Observation** — the raw `state` vector in `{-1, 0, 1}^dim`.
+    * **Episode length** — exactly `dim` steps.
+
+    Args:
+        dim: Number of lattice sites $D$. For an $N \times N$ lattice pass `N * N`.
+
+    References:
+        Zhang, D., Malkin, N., Liu, Z., Volokhova, A., Courville, A., Bengio, Y. (2022).
+        Generative flow networks for discrete probabilistic modeling. ICML.
     """
 
     def __init__(self, dim: int = 10) -> None:
         self.dim = dim
 
     def reset(self) -> EnvState:
+        """Returns the empty lattice (all sites `-1`)."""
         return EnvState(
             state=jnp.full((self.dim,), -1, dtype=jnp.int8),
             time=jnp.int32(0),
@@ -55,10 +96,12 @@ class IsingEnvironment(BaseEnvironment[EnvState, EnvParams]):
         )
 
     def init(self, rng_key: chex.PRNGKey) -> EnvParams:
+        """Returns `EnvParams(dim)`. The environment is deterministic."""
         return EnvParams(dim=self.dim)
 
     @property
     def max_steps_in_episode(self) -> int:
+        """Every trajectory assigns all `dim` sites."""
         return self.dim
 
     def step(
@@ -67,6 +110,17 @@ class IsingEnvironment(BaseEnvironment[EnvState, EnvParams]):
         action: TAction,
         env_params: EnvParams,
     ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
+        """Assigns one spin.
+
+        Args:
+            state: Current state.
+            action: Action in `[0, 2 * dim)`; site `action % dim` receives value
+                `action // dim` (`0` = spin $-1$, `1` = spin $+1$).
+            env_params: Environment parameters.
+
+        Returns:
+            `(obs, next_state, done, info)`; `done` is `True` once all sites are assigned.
+        """
         spin_index = jnp.mod(action, self.dim)
         spin_value = jnp.asarray(action // self.dim, dtype=jnp.int8)
         new_state_arr = state.state.at[spin_index].set(spin_value)
@@ -94,6 +148,16 @@ class IsingEnvironment(BaseEnvironment[EnvState, EnvParams]):
         backward_action: chex.Array,
         env_params: EnvParams,
     ) -> tuple[chex.Array, EnvState, TDone, dict[Any, Any]]:
+        """Clears one assigned spin.
+
+        Args:
+            state: Current state.
+            backward_action: Site index in `[0, dim)` to reset to `-1`.
+            env_params: Environment parameters.
+
+        Returns:
+            `(obs, prev_state, done, info)`; `done` is `True` once the lattice is empty.
+        """
         prev_state_arr = state.state.at[backward_action].set(-1)
         non_initial = EnvState(
             state=prev_state_arr,
@@ -114,7 +178,7 @@ class IsingEnvironment(BaseEnvironment[EnvState, EnvParams]):
         )
 
     def get_obs(self, state: EnvState, env_params: EnvParams) -> chex.Array:
-        """Returns the lattice partial assignment of spins (single state)."""
+        """Returns the partial spin assignment `state.state` (values in `{-1, 0, 1}`)."""
         return state.state
 
     def get_backward_action(
@@ -124,7 +188,7 @@ class IsingEnvironment(BaseEnvironment[EnvState, EnvParams]):
         next_state: EnvState,
         params: EnvParams,
     ) -> chex.Array:
-        """Returns backward action given the forward transition (single)."""
+        """Returns the site index `forward_action % dim` that was assigned."""
         return jnp.mod(forward_action, self.dim)
 
     def get_forward_action(
@@ -134,7 +198,7 @@ class IsingEnvironment(BaseEnvironment[EnvState, EnvParams]):
         prev_state: EnvState,
         env_params: EnvParams,
     ) -> chex.Array:
-        """Returns forward action given the backward transition (single)."""
+        """Returns `site + dim * value`, the forward action that re-assigns the cleared site."""
         return backward_action + self.dim * state.state[backward_action].astype(jnp.int32)
 
     def get_action_mask(self, state: EnvState, env_params: EnvParams) -> chex.Array:

@@ -23,6 +23,7 @@ import optax
 from jaxtyping import Array, Int
 from omegaconf import OmegaConf
 from utils.checkpoint import save_checkpoint
+from utils.config import FrozenConfig, freeze_config
 from utils.logger import Writer
 
 import gfnx
@@ -30,6 +31,7 @@ from gfnx.metrics import (
     AccumulatedModesMetricsModule,
     MultiMetricsModule,
     MultiMetricsState,
+    OnPolicyFCSMetricsModule,
     TestCorrelationMetricsModule,
 )
 
@@ -119,7 +121,7 @@ class TransformerPolicy(eqx.Module):
 # Define the train state that will be used in the training loop
 class TrainState(NamedTuple):
     rng_key: chex.PRNGKey
-    config: OmegaConf
+    config: FrozenConfig
     env: gfnx.BitseqEnvironment
     env_params: gfnx.BitseqEnvParams
     reward_module: gfnx.BitseqRewardModule
@@ -253,6 +255,11 @@ def train_step(idx: int, train_state: TrainState) -> TrainState:
                     env_params=train_state.env_params,
                     reward_params=train_state.reward_params,
                 ),
+                "fcs": OnPolicyFCSMetricsModule.ProcessArgs(
+                    policy_params=policy_params,
+                    env_params=train_state.env_params,
+                    reward_params=train_state.reward_params,
+                ),
             }
         ),
         eval_each=train_state.config.logging.eval_each,
@@ -363,6 +370,15 @@ def run_experiment(cfg: OmegaConf) -> None:
         policy_outputs = policy(env_obs)
         return policy_outputs["backward_logits"], policy_outputs
 
+    # Forward policy without exploration, used by the FCS metric to sample subsets
+    def fwd_policy_fn(
+        rng_key: chex.PRNGKey, env_obs: gfnx.TObs, policy_params
+    ) -> tuple[chex.Array, dict]:
+        del rng_key
+        policy = eqx.combine(policy_params, policy_static)
+        policy_outputs = policy(env_obs)
+        return policy_outputs["forward_logits"], policy_outputs
+
     metrics_module = MultiMetricsModule({
         "correlation": TestCorrelationMetricsModule(
             env=env,
@@ -378,6 +394,16 @@ def run_experiment(cfg: OmegaConf) -> None:
                 gfnx.utils.bitseq.detokenize(y.tokens, env.k),
             ),
             distance_threshold=cfg.metrics.mode_threshold,
+        ),
+        "fcs": OnPolicyFCSMetricsModule(
+            env=env,
+            reward_module=reward_module,
+            fwd_policy_fn=fwd_policy_fn,
+            bwd_policy_fn=bwd_policy_fn,
+            subset_size=cfg.metrics.fcs.subset_size,
+            n_subsets=cfg.metrics.fcs.n_subsets,
+            n_rounds=cfg.metrics.fcs.n_rounds,
+            batch_size=cfg.metrics.fcs.batch_size,
         ),
     })
 
@@ -409,7 +435,7 @@ def run_experiment(cfg: OmegaConf) -> None:
 
     train_state = TrainState(
         rng_key=rng_key,
-        config=cfg,
+        config=freeze_config(cfg),
         env=env,
         env_params=env_params,
         reward_module=reward_module,

@@ -10,11 +10,11 @@ sources = ["src"]
 name = "gfnx"
 version = "0.1.0"
 dependencies = [
-  "jax>=0.4.27.0,<0.10.0",
-  "jaxlib>=0.4.27.0,<0.10.0",
+  "jax>=0.11.0,<0.13.0",
+  "jaxlib>=0.11.0,<0.13.0",
   "chex",
   "flashbax",
-  "numpy==1.26.4",
+  "numpy>=2.1",
   "jax_tqdm",
   "jaxtyping",
   "networkx",
@@ -33,9 +33,14 @@ authors = [
 license = "MIT"
 description = "Environments for Generative Flow Networks in JAX"
 readme = "README.md"
-requires-python = ">=3.10"
+# <3.15: flashbax needs tensorstore, which has no Python 3.15 wheels yet.
+requires-python = ">=3.12,<3.15"
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
 ]
 
@@ -46,13 +51,16 @@ baselines = [
   "flashbax",
   "wandb",
   "orbax-checkpoint",
-  "hydra-core",
+  # hydra-core 1.3.x crashes at startup on Python 3.14 (argparse rejects its help strings);
+  # 1.4.0rc3 (a release candidate) works. Drop the split once 1.4.0 is final.
+  "hydra-core>=1.3.2; python_version < '3.14'",
+  "hydra-core>=1.4.0rc3; python_version >= '3.14'",
   "jax_tqdm",
   "pillow",
   "jraph"
 ]
 cuda12 = [
-  "jax[cuda12]>=0.4.27.0,<0.10.0",
+  "jax[cuda12]>=0.11.0,<0.13.0",
 ]
 tests = [
   "pytest",
@@ -62,6 +70,7 @@ tests = [
 [project.urls]
 Homepage = "https://github.com/d-tiapkin/gfnx"
 Issues = "https://github.com/d-tiapkin/gfnx/issues"
+Documentation = "https://gfnx.readthedocs.io/en/latest/"
 
 
 
@@ -75,7 +84,7 @@ exclude = [
 ]
 line-length = 99
 indent-width = 4
-target-version = "py310"
+target-version = "py312"
 
 
 [tool.ruff.lint]
@@ -83,7 +92,12 @@ target-version = "py310"
 # overlap with the use of a formatter, like Black, but we can override this behavior by
 # explicitly adding the rule.
 extend-select = ["E501"]
-ignore = [ "F722" ]
+ignore = [
+    "F722",
+    # PEP 695 generics (py312 target): keep the `Generic[...]`/TypeVar style for now.
+    "UP046",
+    "UP047",
+]
 
 
 [tool.ruff.lint.pydocstyle]
