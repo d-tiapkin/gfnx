@@ -35,7 +35,8 @@ baselines on 3.12 and 3.14.
   unhashable — see `FrozenConfig` below.
 - **Python 3.15** is blocked upstream: `flashbax` needs `tensorstore`, which has no cp315 wheels
   yet and does not build from source. Hence the `<3.15` cap in `requires-python`; lift it (and add
-  3.15 to CI) once tensorstore ships cp315 wheels.
+  3.15 to CI) once tensorstore ships cp315 wheels. Do not drop flashbax to unblock 3.15: gfnx
+  only uses its in-memory buffers today, but its prioritized replay buffer is planned for use.
 - **Ruff `target-version = "py312"`** enables preview rules UP046/UP047 (PEP 695 generics). They
   are ignored in `pyproject.toml`; the codebase keeps the `Generic[...]`/`TypeVar` style.
 
