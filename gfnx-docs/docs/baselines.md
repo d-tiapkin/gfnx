@@ -35,7 +35,7 @@ The walkthrough page contains a short proof-of-concept guide to this pattern: se
 
 ## Evaluation metrics
 
-Each script logs its evaluation metrics under `eval/` every `logging.eval_each` steps. Every baseline that combines several metrics also reports [flow consistency in sub-graphs](metrics/fcs.md#in-the-baselines) (`eval/fcs/fcs`), configured under `metrics.fcs`.
+Each script logs its evaluation metrics under `eval/` every `logging.eval_each` steps. Most baselines also report [flow consistency in sub-graphs](metrics/fcs.md#in-the-baselines) (`eval/fcs/fcs`), configured under `metrics.fcs`; the FCS page lists which ones.
 
 ## How to run a baseline
 

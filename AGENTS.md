@@ -566,10 +566,10 @@ EUBOMetricsModule.ProcessArgs(policy_params=..., env_params=..., reward_params=t
 
 **JSD metric** (paper §B.4, Eq. 15): used for DAG. JSD(P||Q) = ½KL(P||M) + ½KL(Q||M), M = ½(P+Q). Exact posterior computable since |DAGs with d=5| = 29,281.
 
-**FCS in baselines**: every baseline built on `MultiMetricsModule` (all except the three single-metric hypergrid scripts, the multiseed scripts and `tb_ising.py`) reports `eval/fcs/fcs` via `OnPolicyFCSMetricsModule`. It is given setup-time `fwd_policy_fn` / `bwd_policy_fn` that call the policy **without ε-exploration** (the training-loop `fwd_policy_fn` explores, so it cannot be reused). Settings live in `cfg.metrics.fcs.{subset_size, n_subsets, n_rounds, batch_size}`:
+**FCS in baselines**: every baseline built on `MultiMetricsModule` reports `eval/fcs/fcs` via `OnPolicyFCSMetricsModule`. The exceptions are `db_gfp.py` (the GFP baseline is broken and has no trained proxy), plus the three single-metric hypergrid scripts, the multiseed scripts and `tb_ising.py`, which don't use `MultiMetricsModule`. Each script passes setup-time `fwd_policy_fn` / `bwd_policy_fn` that call the policy **without ε-exploration** (the training-loop `fwd_policy_fn` explores, so it cannot be reused). Settings live in `cfg.metrics.fcs.{subset_size, n_subsets, n_rounds, batch_size}`:
 - Defaults are 32 subsets × 128 states (as in the paper), `n_rounds: 10`.
-- Autoregressive envs (TFBind8, AMP, GFP) use `n_rounds: 1`, which is exact because each sequence has a single trajectory.
-- AMP and GFP lower `n_subsets` to match the top-k metric's rollout budget; phylo uses 8 × 32 with `n_rounds: 8`.
+- Autoregressive envs (TFBind8, AMP) use `n_rounds: 1`, which is exact because each sequence has a single trajectory.
+- AMP lowers `n_subsets` to 16 to match the top-k metric's rollout budget; phylo uses 8 × 32 with `n_rounds: 8`.
 - FCS is the most expensive eval metric in most baselines (≈2 s per eval for `tb_hypergrid` on CPU at the defaults). The smoke tests shrink it via `_FCS_SMALL`.
 
 ---

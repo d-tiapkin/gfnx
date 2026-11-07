@@ -70,11 +70,10 @@ Both variants return `fcs`.
 
 ## In the baselines
 
-Every baseline script that combines several metrics reports FCS as `eval/fcs/fcs`:
+These baseline scripts report FCS as `eval/fcs/fcs`:
 
 - the TB, DB and SubTB scripts for bit sequences and TFBind-8;
 - the TB and DB scripts for QM9 and AMP;
-- the DB script for GFP;
 - `tb_hypergrid.py`, `mdb_dag.py`, `mdb_dag_replay_buffer.py` and `fldb_phylo.py`.
 
 They use `OnPolicyFCSMetricsModule` with the current policy, without ε-exploration. The settings live under `metrics.fcs` in each config:
@@ -90,10 +89,9 @@ metrics:
 
 The defaults follow the paper (32 subsets of up to 128 states), with these exceptions:
 
-- TFBind-8, AMP and GFP are autoregressive. Each sequence has a single trajectory, so
+- TFBind-8 and AMP are autoregressive. Each sequence has a single trajectory, so
   `n_rounds: 1` already gives the exact $p_T$.
-- AMP and GFP use fewer subsets (16 and 4), so that FCS samples as many sequences as the
-  top-k metric does.
+- AMP uses 16 subsets, so that FCS samples as many sequences as the top-k metric does.
 - Phylogenetic trees use 8 subsets of 32 trees with 8 backward rollouts each, because
   their rollouts are expensive.
 
