@@ -89,6 +89,7 @@ class PhyloTreeEnvironment(BaseEnvironment[EnvState, EnvParams]):
         return EnvParams(
             num_nodes=self.num_nodes,
             sequence_length=self.sequence_length,
+            bits_per_seq_elem=self.bits_per_seq_elem,
         )
 
     def step(
